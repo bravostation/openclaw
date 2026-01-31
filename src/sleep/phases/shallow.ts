@@ -16,6 +16,8 @@ import {
   updateCheckTask,
   securityScanTask,
   developmentRadarTask,
+  apiKeyValidationTask,
+  systemDependenciesTask,
 } from "../tasks/index.js";
 
 const log = createSubsystemLogger("sleep/shallow");
@@ -55,22 +57,30 @@ function getEnabledTasks(sleepCfg: ResolvedSleepConfig): ShallowSleepTask[] {
   }
 
   // Health tasks
-  if (shallow.tasks.configValidation) {
-    tasks.push(configValidationTask);
-  }
-  if (shallow.tasks.credentialsCheck) {
-    tasks.push(credentialsCheckTask);
-  }
-  if (shallow.tasks.integrationProbe) {
-    tasks.push(integrationProbeTask);
-  }
-  if (shallow.tasks.memoryIntegrity) {
-    tasks.push(memoryIntegrityTask);
+  if (shallow.tasks.enabled !== false) {
+    if (shallow.tasks.configValidation) {
+      tasks.push(configValidationTask);
+    }
+    if (shallow.tasks.credentialsCheck) {
+      tasks.push(credentialsCheckTask);
+    }
+    if (shallow.tasks.integrationProbe) {
+      tasks.push(integrationProbeTask);
+    }
+    if (shallow.tasks.memoryIntegrity) {
+      tasks.push(memoryIntegrityTask);
+    }
+    if (shallow.tasks.apiKeyValidation) {
+      tasks.push(apiKeyValidationTask);
+    }
   }
 
   // Update tasks
   if (shallow.updates.enabled) {
     tasks.push(updateCheckTask);
+    if (shallow.updates.checkSystemDependencies) {
+      tasks.push(systemDependenciesTask);
+    }
   }
 
   // Security tasks

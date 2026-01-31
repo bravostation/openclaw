@@ -20,15 +20,18 @@ export const DEFAULT_REPORT_LEVEL = "summary" as const;
 
 // Shallow sleep defaults
 export const DEFAULT_SHALLOW_ENABLED = true;
+export const DEFAULT_TASKS_ENABLED = true;
 export const DEFAULT_TASKS_CONFIG_VALIDATION = true;
 export const DEFAULT_TASKS_CREDENTIALS_CHECK = true;
 export const DEFAULT_TASKS_INTEGRATION_PROBE = true;
 export const DEFAULT_TASKS_MEMORY_INTEGRITY = true;
+export const DEFAULT_TASKS_API_KEY_VALIDATION = true;
 
 export const DEFAULT_UPDATES_ENABLED = true;
 export const DEFAULT_UPDATES_CHECK_OPENCLAW = true;
 export const DEFAULT_UPDATES_CHECK_DEPENDENCIES = true;
 export const DEFAULT_UPDATES_CHECK_TOOLS = true;
+export const DEFAULT_UPDATES_CHECK_SYSTEM_DEPENDENCIES = true;
 export const DEFAULT_UPDATES_AUTO_UPDATE = false; // Never auto-update
 
 export const DEFAULT_SECURITY_ENABLED = true;
@@ -76,22 +79,26 @@ export const DEFAULT_LLM_REFLECTION_PROMOTE_THRESHOLD = 0.5;
 export type ResolvedSleepShallowConfig = {
   enabled: boolean;
   tasks: {
+    enabled: boolean;
     configValidation: boolean;
     credentialsCheck: boolean;
     integrationProbe: boolean;
     memoryIntegrity: boolean;
+    apiKeyValidation: boolean;
   };
   updates: {
     enabled: boolean;
     checkOpenclaw: boolean;
     checkDependencies: boolean;
     checkTools: boolean;
+    checkSystemDependencies: boolean;
     autoUpdate: boolean;
   };
   security: {
     enabled: boolean;
     npmAudit: boolean;
     credentialScan: boolean;
+    credentialLeakScan: boolean;
     advisoryCheck: boolean;
     tlsCheck: boolean;
   };
@@ -185,22 +192,27 @@ function resolveShallowConfig(cfg?: SleepShallowConfig): ResolvedSleepShallowCon
   return {
     enabled: cfg?.enabled ?? DEFAULT_SHALLOW_ENABLED,
     tasks: {
+      enabled: cfg?.tasks?.enabled ?? DEFAULT_TASKS_ENABLED,
       configValidation: cfg?.tasks?.configValidation ?? DEFAULT_TASKS_CONFIG_VALIDATION,
       credentialsCheck: cfg?.tasks?.credentialsCheck ?? DEFAULT_TASKS_CREDENTIALS_CHECK,
       integrationProbe: cfg?.tasks?.integrationProbe ?? DEFAULT_TASKS_INTEGRATION_PROBE,
       memoryIntegrity: cfg?.tasks?.memoryIntegrity ?? DEFAULT_TASKS_MEMORY_INTEGRITY,
+      apiKeyValidation: cfg?.tasks?.apiKeyValidation ?? DEFAULT_TASKS_API_KEY_VALIDATION,
     },
     updates: {
       enabled: cfg?.updates?.enabled ?? DEFAULT_UPDATES_ENABLED,
       checkOpenclaw: cfg?.updates?.checkOpenclaw ?? DEFAULT_UPDATES_CHECK_OPENCLAW,
       checkDependencies: cfg?.updates?.checkDependencies ?? DEFAULT_UPDATES_CHECK_DEPENDENCIES,
       checkTools: cfg?.updates?.checkTools ?? DEFAULT_UPDATES_CHECK_TOOLS,
+      checkSystemDependencies:
+        cfg?.updates?.checkSystemDependencies ?? DEFAULT_UPDATES_CHECK_SYSTEM_DEPENDENCIES,
       autoUpdate: cfg?.updates?.autoUpdate ?? DEFAULT_UPDATES_AUTO_UPDATE,
     },
     security: {
       enabled: cfg?.security?.enabled ?? DEFAULT_SECURITY_ENABLED,
       npmAudit: cfg?.security?.npmAudit ?? DEFAULT_SECURITY_NPM_AUDIT,
       credentialScan: cfg?.security?.credentialScan ?? DEFAULT_SECURITY_CREDENTIAL_SCAN,
+      credentialLeakScan: cfg?.security?.credentialLeakScan ?? DEFAULT_SECURITY_CREDENTIAL_SCAN,
       advisoryCheck: cfg?.security?.advisoryCheck ?? DEFAULT_SECURITY_ADVISORY_CHECK,
       tlsCheck: cfg?.security?.tlsCheck ?? DEFAULT_SECURITY_TLS_CHECK,
     },
