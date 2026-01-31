@@ -194,6 +194,8 @@ export type AgentDefaultsConfig = {
      */
     includeReasoning?: boolean;
   };
+  /** Sleep system for scheduled maintenance and memory consolidation. */
+  sleep?: AgentSleepConfig;
   /** Max concurrent agent runs across all conversations. Default: 1 (sequential). */
   maxConcurrent?: number;
   /** Sub-agent defaults (spawned via sessions_spawn). */
@@ -261,4 +263,137 @@ export type AgentCompactionMemoryFlushConfig = {
   prompt?: string;
   /** System prompt appended for the memory flush turn. */
   systemPrompt?: string;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sleep System Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SleepShallowTasksConfig = {
+  /** Validate config schema and integrity. */
+  configValidation?: boolean;
+  /** Check for expiring credentials/tokens. */
+  credentialsCheck?: boolean;
+  /** Probe channel integrations for connectivity. */
+  integrationProbe?: boolean;
+  /** Verify memory store integrity (SQLite checks). */
+  memoryIntegrity?: boolean;
+};
+
+export type SleepUpdatesConfig = {
+  /** Enable update checks during shallow sleep. */
+  enabled?: boolean;
+  /** Check for openclaw npm updates. */
+  checkOpenclaw?: boolean;
+  /** Check workspace dependencies for updates. */
+  checkDependencies?: boolean;
+  /** Check MCP servers and tools for updates. */
+  checkTools?: boolean;
+  /** Never auto-update; always advisory only. */
+  autoUpdate?: boolean;
+};
+
+export type SleepSecurityConfig = {
+  /** Enable security scanning during shallow sleep. */
+  enabled?: boolean;
+  /** Run npm audit on workspace. */
+  npmAudit?: boolean;
+  /** Scan for leaked credential patterns. */
+  credentialScan?: boolean;
+  /** Query GitHub Advisory Database for CVEs. */
+  advisoryCheck?: boolean;
+  /** Check TLS/certificate configurations. */
+  tlsCheck?: boolean;
+};
+
+export type SleepRadarConfig = {
+  /** Enable development radar during shallow sleep. */
+  enabled?: boolean;
+  /** Check for new AI model releases. */
+  newModels?: boolean;
+  /** Monitor MCP/API protocol updates. */
+  protocolUpdates?: boolean;
+  /** Watch for breaking changes in dependencies. */
+  breakingChanges?: boolean;
+  /** Custom RSS/API sources to monitor. */
+  sources?: string[];
+};
+
+export type SleepShallowConfig = {
+  /** Enable shallow sleep phase. */
+  enabled?: boolean;
+  /** Health check tasks. */
+  tasks?: SleepShallowTasksConfig;
+  /** Tool/dependency update checks. */
+  updates?: SleepUpdatesConfig;
+  /** Security scanning tasks. */
+  security?: SleepSecurityConfig;
+  /** Development radar tasks. */
+  radar?: SleepRadarConfig;
+};
+
+export type SleepMemoryPruningConfig = {
+  /** Enable memory pruning during deep sleep. */
+  enabled?: boolean;
+  /** Max age in hours for session chunks before pruning (default: 168 = 7 days). */
+  maxAgeHours?: number;
+  /** Decay factor for memory relevance (0-1, default: 0.1). */
+  decayFactor?: number;
+};
+
+export type SleepMemoryCompactionConfig = {
+  /** Enable memory compaction during deep sleep. */
+  enabled?: boolean;
+  /** Minimum chunks before compaction triggers (default: 100). */
+  minChunks?: number;
+};
+
+export type SleepCoreMemoryConfig = {
+  /** Enable core memory extraction during deep sleep. */
+  enabled?: boolean;
+  /** Minimum recurrence count for pattern detection (default: 3). */
+  minRecurrence?: number;
+  /** Minimum confidence threshold for core memory creation (0-1, default: 0.7). */
+  minConfidence?: number;
+};
+
+export type SleepMemoryPromotionConfig = {
+  /** Enable medium-term to long-term memory promotion (default: true). */
+  enabled?: boolean;
+  /** Minimum reinforcement count before promoting to long-term (default: 3). */
+  minReinforcementsForLongTerm?: number;
+  /** Minimum confidence threshold for long-term promotion (0-1, default: 0.7). */
+  minConfidenceForLongTerm?: number;
+};
+
+export type SleepDeepConfig = {
+  /** Enable deep sleep phase. */
+  enabled?: boolean;
+  /** Memory pruning settings. */
+  memoryPruning?: SleepMemoryPruningConfig;
+  /** Memory compaction settings. */
+  memoryCompaction?: SleepMemoryCompactionConfig;
+  /** Memory promotion settings (medium-term to long-term). */
+  memoryPromotion?: SleepMemoryPromotionConfig;
+  /** Core memory extraction settings. */
+  coreMemory?: SleepCoreMemoryConfig;
+};
+
+export type AgentSleepConfig = {
+  /** Enable the sleep system (default: false). */
+  enabled?: boolean;
+  /** Sleep window in local time (HH:MM-HH:MM, default: "03:00-06:00"). */
+  window?: string;
+  /** Minimum idle minutes before sleep can start (default: 45). */
+  minIdleMinutes?: number;
+  /** Allow user activity to interrupt sleep (default: true). */
+  allowInterrupt?: boolean;
+  /** Report detail level (default: "summary"). */
+  reportLevel?: "summary" | "full";
+  /** Timezone for sleep window ("user", "local", or IANA TZ id). */
+  timezone?: string;
+  /** Shallow sleep phase configuration. */
+  shallow?: SleepShallowConfig;
+  /** Deep sleep phase configuration. */
+  deep?: SleepDeepConfig;
 };
