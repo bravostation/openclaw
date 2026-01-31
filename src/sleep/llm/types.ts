@@ -35,6 +35,8 @@ export type CoreMemoryEntry = {
   id: string;
   theme: MemoryTheme;
   description: string;
+  /** Why this is a core memory - concise explanation of its significance. */
+  reason?: string;
   confidence: number;
   supportingMemoryIds: string[];
   createdAt: number;
@@ -45,6 +47,8 @@ export type CoreMemoryEntry = {
 export type LongTermMemoryEntry = {
   id: string;
   content: string;
+  /** Why this is in long-term memory - concise explanation of its importance. */
+  reason?: string;
   confidence: number;
   createdAt: number;
   accessCount: number;
@@ -97,6 +101,8 @@ export type PromotionReflectionResult = {
 export type CoreMemorySynthesisResult = {
   theme: MemoryTheme;
   description: string;
+  /** Why this is a core memory - what makes it significant. */
+  reason?: string;
   confidence: number;
   supportingMemoryIds: string[];
   reinforcesExisting?: string; // ID of existing core memory this reinforces

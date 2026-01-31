@@ -279,7 +279,7 @@ export function loadMediumTermMemoriesFromAgent(agentDir: string): MediumTermMem
  * Includes the memory and WHY it matters, but no metadata.
  */
 function formatCoreMemoryLine(memory: CoreMemoryEntry): string {
-  // Theme provides the "why" context
+  // Theme provides the category context
   const themeLabel: Record<CoreMemoryEntry["theme"], string> = {
     user_preference: "Preference",
     user_values: "Value",
@@ -289,13 +289,18 @@ function formatCoreMemoryLine(memory: CoreMemoryEntry): string {
     relationship: "Relationship",
     goal: "Goal",
   };
-  const why = themeLabel[memory.theme] || "Memory";
-  return `- **${why}:** ${memory.description}`;
+  const category = themeLabel[memory.theme] || "Memory";
+
+  // Include the reason (why this is a core memory) when available
+  if (memory.reason) {
+    return `- **${category}:** ${memory.description} — *${memory.reason}*`;
+  }
+  return `- **${category}:** ${memory.description}`;
 }
 
 /**
  * Format a long-term memory as a clean, single-line entry for context.
- * Includes the memory content with tag-based context.
+ * Includes the memory content with tag-based context and optional reason.
  */
 function formatLongTermMemoryLine(memory: LongTermMemoryEntry): string {
   // Extract first meaningful line, skipping headers and empty content
@@ -306,16 +311,19 @@ function formatLongTermMemoryLine(memory: LongTermMemoryEntry): string {
   const cleaned = firstLine
     .replace(/^[-*]\s*/, "") // Remove list markers
     .replace(/\*\*/g, "") // Remove bold
-    .slice(0, 150);
-  const truncated = cleaned.length >= 150 ? cleaned.slice(0, 147) + "..." : cleaned;
+    .slice(0, 120);
+  const truncated = cleaned.length >= 120 ? cleaned.slice(0, 117) + "..." : cleaned;
+
+  // Include the reason (why this is important) when available
+  const reasonPart = memory.reason ? ` — *${memory.reason}*` : "";
 
   // Use tags to provide context if available
   const tag = memory.tags?.[0];
   if (tag && tag !== "fact") {
     const tagLabel = tag.charAt(0).toUpperCase() + tag.slice(1);
-    return `- **${tagLabel}:** ${truncated}`;
+    return `- **${tagLabel}:** ${truncated}${reasonPart}`;
   }
-  return `- ${truncated}`;
+  return `- ${truncated}${reasonPart}`;
 }
 
 /**

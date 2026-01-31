@@ -176,6 +176,7 @@ Respond with a JSON array only, no additional text:
 [{
   "theme": "user_preference" | "user_values" | "behavioral_pattern" | "relationship" | "expertise" | "goal" | "constraint",
   "description": "concise description of the pattern",
+  "reason": "why this matters - what makes it core to identity (1 sentence)",
   "confidence": 0.0-1.0,
   "supportingMemoryIds": ["id1", "id2", ...],
   "reinforcesExisting": "existing_core_id" | null
