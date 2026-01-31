@@ -69,13 +69,14 @@ workspace/
 └── memory/
     ├── memories-core.json    ← Full metadata for sleep processing
     ├── memories-long.json    ← Full metadata for sleep processing
-    └── memories-medium.md    ← Indexed for memory_search tool
+    ├── memories-medium.json  ← Full metadata for sleep processing
+    └── memories-medium.md    ← Clean list, indexed for memory_search tool
 ```
 
-**Markdown files** (`MEMORIES-*.md`) are clean, minimal lists designed for context:
-- One line per memory with a brief "why" label
+**Markdown files** (`MEMORIES-*.md`, `memories-medium.md`) are clean, minimal lists:
+- One line per memory with a brief category/why label
 - No metadata, timestamps, or confidence scores
-- Human-readable and easy to review
+- Human-readable and optimized for context/search
 
 **JSON files** (`memories-*.json`) store full metadata:
 - IDs, timestamps, confidence, reinforcement counts

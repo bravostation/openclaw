@@ -573,7 +573,7 @@ async function syncMemoriesToWorkspace(params: {
     saveLongTermMemoriesToWorkspace(workspaceDir, longTermEntries);
   }
 
-  // Write medium-term memories to memory/ directory as markdown for search indexing
+  // Write medium-term memories to memory/ directory
   const mediumTermMemories = await getMediumTermMemories(agentId);
   if (mediumTermMemories.length > 0) {
     const memoryDir = path.join(workspaceDir, "memory");
@@ -581,30 +581,38 @@ async function syncMemoriesToWorkspace(params: {
       mkdirSync(memoryDir, { recursive: true });
     }
 
-    const mediumTermPath = path.join(memoryDir, "memories-medium.md");
-    const header = `# Medium-Term Memories
+    // Write clean markdown for search tool indexing
+    const mdPath = path.join(memoryDir, "memories-medium.md");
+    const mdHeader = `# Medium-Term Memories
 
-These are patterns and learnings that have appeared multiple times.
-Searched when relevant to a conversation but not loaded into every context.
-Promoted to long-term when reinforced enough times.
-
----
+Patterns and learnings that have appeared multiple times.
+Searched when relevant but not loaded into every context.
 
 `;
-    const sections = mediumTermMemories.map((m) => {
-      const lines = [
-        `## ${m.summary.slice(0, 60)}${m.summary.length > 60 ? "..." : ""}`,
-        `- **ID**: ${m.id}`,
-        `- **Category**: ${m.category}`,
-        `- **Confidence**: ${(m.confidence * 100).toFixed(0)}%`,
-        `- **Reinforcements**: ${m.reinforcementCount}`,
-        `- **Promoted to long-term**: ${m.promotedToLongTerm ? "Yes" : "No"}`,
-        "",
-        m.detail || m.summary,
-      ];
-      return lines.join("\n");
+    const mdLines = mediumTermMemories.map((m) => {
+      // Clean single line with category context - extract first meaningful line
+      const category = m.category.charAt(0).toUpperCase() + m.category.slice(1);
+      const lines = m.summary.split("\n").filter((l) => l.trim() && !l.startsWith("#"));
+      const firstLine = (lines[0] || m.summary.split("\n")[0] || m.summary).trim();
+      const cleaned = firstLine.replace(/^[-*]\s*/, "").replace(/\*\*/g, "");
+      const truncated = cleaned.length > 100 ? cleaned.slice(0, 97) + "..." : cleaned;
+      return `- **${category}:** ${truncated}`;
     });
+    writeFileSync(mdPath, mdHeader + mdLines.join("\n"), "utf-8");
 
-    writeFileSync(mediumTermPath, header + sections.join("\n\n---\n\n"), "utf-8");
+    // Write JSON for full metadata (sleep processing)
+    const jsonPath = path.join(memoryDir, "memories-medium.json");
+    const jsonEntries = mediumTermMemories.map((m) => ({
+      id: m.id,
+      category: m.category,
+      summary: m.summary,
+      detail: m.detail,
+      confidence: m.confidence,
+      reinforcementCount: m.reinforcementCount,
+      promotedToLongTerm: m.promotedToLongTerm,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
+    }));
+    writeFileSync(jsonPath, JSON.stringify(jsonEntries, null, 2), "utf-8");
   }
 }
