@@ -37,12 +37,12 @@ Enable sleep in your config:
 
 The sleep system manages a four-tier memory hierarchy:
 
-| Tier | Workspace File | Loaded Into Context | Purpose |
-|------|----------------|---------------------|---------|
+| Tier | Files | Loaded Into Context | Purpose |
+|------|-------|---------------------|---------|
 | **Short-term** | (SQLite) | No | Daily activities, conversation context |
 | **Medium-term** | `memory/memories-medium.md` | Searchable | Reinforced patterns, not yet stable |
-| **Long-term** | `MEMORIES-LONG.md` | Yes (bootstrap) | Stable facts, confirmed preferences |
-| **Core** | `MEMORIES-CORE.md` | Yes (bootstrap) | Identity-shaping patterns, never deleted |
+| **Long-term** | `MEMORIES-LONG.md` + `memory/memories-long.json` | Yes (bootstrap) | Stable facts, confirmed preferences |
+| **Core** | `MEMORIES-CORE.md` + `memory/memories-core.json` | Yes (bootstrap) | Identity-shaping patterns, never deleted |
 
 ### Memory Flow
 
@@ -54,8 +54,8 @@ Short-term → Medium-term → Long-term → Core
 
 - **Short-term**: Raw conversation chunks in SQLite, pruned after `maxAgeHours` (default: 7 days)
 - **Medium-term**: Extracted during sleep, written to `memory/memories-medium.md` for search indexing
-- **Long-term**: Promoted from medium-term after 3+ reinforcements at 0.7+ confidence, written to `MEMORIES-LONG.md`
-- **Core**: Identity patterns extracted from long-term, written to `MEMORIES-CORE.md` (never deleted)
+- **Long-term**: Promoted from medium-term after 3+ reinforcements at 0.7+ confidence
+- **Core**: Identity patterns extracted from long-term (never deleted)
 
 ### Workspace Memory Files
 
@@ -63,16 +63,30 @@ After each sleep cycle, memory files are synced to your workspace:
 
 ```
 workspace/
-├── MEMORIES-CORE.md     ← Loaded into every conversation
-├── MEMORIES-LONG.md     ← Loaded into every conversation
+├── MEMORIES-CORE.md          ← Clean list, loaded into every conversation
+├── MEMORIES-LONG.md          ← Clean list, loaded into every conversation  
+├── MEMORY.md                 ← Your notes (optional, also loaded)
 └── memory/
-    └── memories-medium.md  ← Indexed for memory_search tool
+    ├── memories-core.json    ← Full metadata for sleep processing
+    ├── memories-long.json    ← Full metadata for sleep processing
+    └── memories-medium.md    ← Indexed for memory_search tool
 ```
 
-These markdown files are:
-- **Human-readable**: You can review and edit them
-- **Version-controlled**: Commit them to track memory evolution
-- **Portable**: Move your workspace and memories come with it
+**Markdown files** (`MEMORIES-*.md`) are clean, minimal lists designed for context:
+- One line per memory with a brief "why" label
+- No metadata, timestamps, or confidence scores
+- Human-readable and easy to review
+
+**JSON files** (`memories-*.json`) store full metadata:
+- IDs, timestamps, confidence, reinforcement counts
+- Used by sleep processing for promotion decisions
+- Not loaded into conversation context
+
+> **Tip**: Reference `MEMORIES-CORE.md` and `MEMORIES-LONG.md` from your `MEMORY.md` if you want a unified view:
+> ```markdown
+> ## Persistent Memories
+> See [Core Memories](MEMORIES-CORE.md) and [Long-term Memories](MEMORIES-LONG.md).
+> ```
 
 ## Configuration Reference
 

@@ -21,7 +21,9 @@ import type {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const CORE_MEMORIES_FILENAME = "MEMORIES-CORE.md";
+export const CORE_MEMORIES_JSON_FILENAME = "memory/memories-core.json";
 export const LONG_TERM_MEMORIES_FILENAME = "MEMORIES-LONG.md";
+export const LONG_TERM_MEMORIES_JSON_FILENAME = "memory/memories-long.json";
 export const MEDIUM_TERM_MEMORIES_FILENAME = "memories-medium.json";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -194,16 +196,28 @@ export async function loadIdentityContext(params: {
 }
 
 /**
- * Load core memories from workspace MEMORIES-CORE.md file.
+ * Load core memories from workspace - prefer JSON, fallback to markdown parsing.
  */
 export function loadCoreMemoriesFromWorkspace(workspaceDir: string): CoreMemoryEntry[] {
-  const filePath = path.join(workspaceDir, CORE_MEMORIES_FILENAME);
-  if (!existsSync(filePath)) {
+  // Prefer JSON for full metadata
+  const jsonPath = path.join(workspaceDir, CORE_MEMORIES_JSON_FILENAME);
+  if (existsSync(jsonPath)) {
+    try {
+      const content = readFileSync(jsonPath, "utf-8");
+      return JSON.parse(content) as CoreMemoryEntry[];
+    } catch {
+      // Fall through to markdown parsing
+    }
+  }
+
+  // Fallback to markdown (for backwards compatibility)
+  const mdPath = path.join(workspaceDir, CORE_MEMORIES_FILENAME);
+  if (!existsSync(mdPath)) {
     return [];
   }
 
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync(mdPath, "utf-8");
     return parseCoreMemoriesMarkdown(content);
   } catch {
     return [];
@@ -211,16 +225,28 @@ export function loadCoreMemoriesFromWorkspace(workspaceDir: string): CoreMemoryE
 }
 
 /**
- * Load long-term memories from workspace MEMORIES-LONG.md file.
+ * Load long-term memories from workspace - prefer JSON, fallback to markdown parsing.
  */
 export function loadLongTermMemoriesFromWorkspace(workspaceDir: string): LongTermMemoryEntry[] {
-  const filePath = path.join(workspaceDir, LONG_TERM_MEMORIES_FILENAME);
-  if (!existsSync(filePath)) {
+  // Prefer JSON for full metadata
+  const jsonPath = path.join(workspaceDir, LONG_TERM_MEMORIES_JSON_FILENAME);
+  if (existsSync(jsonPath)) {
+    try {
+      const content = readFileSync(jsonPath, "utf-8");
+      return JSON.parse(content) as LongTermMemoryEntry[];
+    } catch {
+      // Fall through to markdown parsing
+    }
+  }
+
+  // Fallback to markdown (for backwards compatibility)
+  const mdPath = path.join(workspaceDir, LONG_TERM_MEMORIES_FILENAME);
+  if (!existsSync(mdPath)) {
     return [];
   }
 
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync(mdPath, "utf-8");
     return parseLongTermMemoriesMarkdown(content);
   } catch {
     return [];
@@ -249,87 +275,103 @@ export function loadMediumTermMemoriesFromAgent(agentDir: string): MediumTermMem
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Format a core memory entry as markdown section.
+ * Format a core memory as a clean, single-line entry for context.
+ * Includes the memory and WHY it matters, but no metadata.
  */
-function formatCoreMemorySection(memory: CoreMemoryEntry): string {
-  const lines = [
-    `## ${memory.description.slice(0, 50)}${memory.description.length > 50 ? "..." : ""}`,
-    `- **ID**: ${memory.id}`,
-    `- **Theme**: ${memory.theme}`,
-    `- **Confidence**: ${memory.confidence.toFixed(2)}`,
-    `- **Description**: ${memory.description}`,
-    `- **Supporting memories**: [${memory.supportingMemoryIds.join(", ")}]`,
-    `- **Created**: ${memory.createdAt}`,
-  ];
-  if (memory.reinforcedAt) {
-    lines.push(`- **Reinforced**: ${memory.reinforcedAt}`);
-  }
-  if (memory.reinforcementCount !== undefined) {
-    lines.push(`- **Reinforcement count**: ${memory.reinforcementCount}`);
-  }
-  return lines.join("\n");
+function formatCoreMemoryLine(memory: CoreMemoryEntry): string {
+  // Theme provides the "why" context
+  const themeLabel: Record<CoreMemoryEntry["theme"], string> = {
+    user_preference: "Preference",
+    user_values: "Value",
+    behavioral_pattern: "Pattern",
+    constraint: "Constraint",
+    expertise: "Expertise",
+    relationship: "Relationship",
+    goal: "Goal",
+  };
+  const why = themeLabel[memory.theme] || "Memory";
+  return `- **${why}:** ${memory.description}`;
 }
 
 /**
- * Format a long-term memory entry as markdown section.
+ * Format a long-term memory as a clean, single-line entry for context.
+ * Includes the memory content with tag-based context.
  */
-function formatLongTermMemorySection(memory: LongTermMemoryEntry): string {
-  const lines = [
-    `## ${memory.content.slice(0, 50)}${memory.content.length > 50 ? "..." : ""}`,
-    `- **ID**: ${memory.id}`,
-    `- **Content**: ${memory.content}`,
-    `- **Confidence**: ${memory.confidence.toFixed(2)}`,
-    `- **Access count**: ${memory.accessCount}`,
-    `- **Created**: ${memory.createdAt}`,
-  ];
-  if (memory.tags?.length) {
-    lines.push(`- **Tags**: [${memory.tags.join(", ")}]`);
+function formatLongTermMemoryLine(memory: LongTermMemoryEntry): string {
+  // Extract first meaningful line, skipping headers and empty content
+  const lines = memory.content.split("\n").filter((l) => l.trim() && !l.startsWith("#"));
+  const firstLine = lines[0]?.trim() || memory.content.split("\n")[0]?.trim() || memory.content;
+
+  // Clean up the line - remove markdown cruft
+  const cleaned = firstLine
+    .replace(/^[-*]\s*/, "") // Remove list markers
+    .replace(/\*\*/g, "") // Remove bold
+    .slice(0, 150);
+  const truncated = cleaned.length >= 150 ? cleaned.slice(0, 147) + "..." : cleaned;
+
+  // Use tags to provide context if available
+  const tag = memory.tags?.[0];
+  if (tag && tag !== "fact") {
+    const tagLabel = tag.charAt(0).toUpperCase() + tag.slice(1);
+    return `- **${tagLabel}:** ${truncated}`;
   }
-  return lines.join("\n");
+  return `- ${truncated}`;
 }
 
 /**
- * Save core memories to workspace MEMORIES-CORE.md file.
+ * Save core memories to workspace - both clean MD for context and JSON for working data.
  */
 export function saveCoreMemoriesToWorkspace(
   workspaceDir: string,
   memories: CoreMemoryEntry[],
 ): void {
-  const filePath = path.join(workspaceDir, CORE_MEMORIES_FILENAME);
+  // Ensure memory directory exists
+  const memoryDir = path.join(workspaceDir, "memory");
+  if (!existsSync(memoryDir)) {
+    mkdirSync(memoryDir, { recursive: true });
+  }
 
-  const header = `# Core Memories
+  // Write clean markdown for context loading (no metadata)
+  const mdPath = path.join(workspaceDir, CORE_MEMORIES_FILENAME);
+  const mdHeader = `# Core Memories
 
-These are identity-shaping patterns that define this agent's character.
-They are loaded into every conversation and influence behavior.
-
----
+Identity-shaping experiences and patterns that define who I am.
 
 `;
+  const mdContent = mdHeader + memories.map((m) => formatCoreMemoryLine(m)).join("\n");
+  writeFileSync(mdPath, mdContent, "utf-8");
 
-  const content = header + memories.map((m) => formatCoreMemorySection(m)).join("\n\n");
-  writeFileSync(filePath, content, "utf-8");
+  // Write JSON for working data (full metadata for sleep processing)
+  const jsonPath = path.join(workspaceDir, CORE_MEMORIES_JSON_FILENAME);
+  writeFileSync(jsonPath, JSON.stringify(memories, null, 2), "utf-8");
 }
 
 /**
- * Save long-term memories to workspace MEMORIES-LONG.md file.
+ * Save long-term memories to workspace - both clean MD for context and JSON for working data.
  */
 export function saveLongTermMemoriesToWorkspace(
   workspaceDir: string,
   memories: LongTermMemoryEntry[],
 ): void {
-  const filePath = path.join(workspaceDir, LONG_TERM_MEMORIES_FILENAME);
+  // Ensure memory directory exists
+  const memoryDir = path.join(workspaceDir, "memory");
+  if (!existsSync(memoryDir)) {
+    mkdirSync(memoryDir, { recursive: true });
+  }
 
-  const header = `# Long-Term Memories
+  // Write clean markdown for context loading (no metadata)
+  const mdPath = path.join(workspaceDir, LONG_TERM_MEMORIES_FILENAME);
+  const mdHeader = `# Long-Term Memories
 
-Stable facts, preferences, and knowledge about the user.
-These are loaded into every conversation alongside core memories.
-
----
+Stable facts, preferences, and knowledge I've learned over time.
 
 `;
+  const mdContent = mdHeader + memories.map((m) => formatLongTermMemoryLine(m)).join("\n");
+  writeFileSync(mdPath, mdContent, "utf-8");
 
-  const content = header + memories.map((m) => formatLongTermMemorySection(m)).join("\n\n");
-  writeFileSync(filePath, content, "utf-8");
+  // Write JSON for working data (full metadata for sleep processing)
+  const jsonPath = path.join(workspaceDir, LONG_TERM_MEMORIES_JSON_FILENAME);
+  writeFileSync(jsonPath, JSON.stringify(memories, null, 2), "utf-8");
 }
 
 /**
