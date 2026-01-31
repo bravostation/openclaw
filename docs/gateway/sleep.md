@@ -37,25 +37,42 @@ Enable sleep in your config:
 
 The sleep system manages a four-tier memory hierarchy:
 
-| Tier | Storage | Auto-loaded | Purpose |
-|------|---------|-------------|---------|
-| **Short-term** | SQLite chunks | No | Daily activities, conversation context |
-| **Medium-term** | JSON file | No (searched) | Reinforced patterns, not yet stable |
-| **Long-term** | JSON file | Yes | Stable facts, confirmed preferences |
-| **Core** | JSON file | Yes | Identity-shaping patterns, never deleted |
+| Tier | Workspace File | Loaded Into Context | Purpose |
+|------|----------------|---------------------|---------|
+| **Short-term** | (SQLite) | No | Daily activities, conversation context |
+| **Medium-term** | `memory/memories-medium.md` | Searchable | Reinforced patterns, not yet stable |
+| **Long-term** | `MEMORIES-LONG.md` | Yes (bootstrap) | Stable facts, confirmed preferences |
+| **Core** | `MEMORIES-CORE.md` | Yes (bootstrap) | Identity-shaping patterns, never deleted |
 
 ### Memory Flow
 
 ```
 Short-term → Medium-term → Long-term → Core
-    ↓            ↓             ↓
- (pruned)   (reinforced)  (promoted)
+     ↓            ↓             ↓
+  (pruned)   (reinforced)   (promoted)
 ```
 
-- **Short-term**: Raw conversation chunks, pruned after `maxAgeHours` (default: 7 days)
-- **Medium-term**: Extracted from short-term during sleep, promoted after reinforcement
-- **Long-term**: Promoted from medium-term after 3+ reinforcements at 0.7+ confidence
-- **Core**: Identity patterns, extreme events can skip directly here
+- **Short-term**: Raw conversation chunks in SQLite, pruned after `maxAgeHours` (default: 7 days)
+- **Medium-term**: Extracted during sleep, written to `memory/memories-medium.md` for search indexing
+- **Long-term**: Promoted from medium-term after 3+ reinforcements at 0.7+ confidence, written to `MEMORIES-LONG.md`
+- **Core**: Identity patterns extracted from long-term, written to `MEMORIES-CORE.md` (never deleted)
+
+### Workspace Memory Files
+
+After each sleep cycle, memory files are synced to your workspace:
+
+```
+workspace/
+├── MEMORIES-CORE.md     ← Loaded into every conversation
+├── MEMORIES-LONG.md     ← Loaded into every conversation
+└── memory/
+    └── memories-medium.md  ← Indexed for memory_search tool
+```
+
+These markdown files are:
+- **Human-readable**: You can review and edit them
+- **Version-controlled**: Commit them to track memory evolution
+- **Portable**: Move your workspace and memories come with it
 
 ## Configuration Reference
 
