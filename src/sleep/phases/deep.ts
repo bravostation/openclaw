@@ -8,6 +8,9 @@
  * (SOUL.md, IDENTITY.md) to make smarter pruning/promotion decisions.
  */
 
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
 import type { OpenClawConfig } from "../../config/config.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { ResolvedSleepConfig } from "../config.js";
@@ -17,6 +20,9 @@ import {
   promoteMemories,
   extractCoreMemories,
   processMediumTermMemories,
+  getCoreMemories,
+  getLongTermMemories,
+  getMediumTermMemories,
   type PruneResult,
   type CompactResult,
   type PromoteResult,
@@ -268,6 +274,32 @@ export async function runDeepSleep(options: DeepSleepOptions): Promise<DeepSleep
           `${llmReflectionResult.longTermMemoriesPromoted} long-term promoted`,
       );
     }
+
+    // Phase 7: Sync memories to workspace markdown files
+    // This ensures MEMORIES-CORE.md and MEMORIES-LONG.md are always up-to-date
+    // for bootstrap loading, even when LLM reflection is disabled
+    if (workspaceDir && !signal?.aborted && !dryRun) {
+      const llmUpdatedWorkspace =
+        llmReflectionResult?.workspaceFilesUpdated &&
+        llmReflectionResult.workspaceFilesUpdated.length > 0;
+
+      // Only sync if LLM reflection didn't already update workspace files
+      if (!llmUpdatedWorkspace) {
+        log.debug("Syncing memories to workspace files");
+        options.onPhaseStart?.("workspaceSync");
+
+        try {
+          await syncMemoriesToWorkspace({
+            agentId,
+            workspaceDir,
+          });
+          options.onPhaseComplete?.("workspaceSync", { synced: true });
+          log.debug("Workspace memory files synced");
+        } catch (syncErr) {
+          log.warn(`Failed to sync workspace files: ${String(syncErr)}`);
+        }
+      }
+    }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
     log.error(`Deep sleep failed: ${error}`);
@@ -479,4 +511,100 @@ export function summarizeDeepSleep(result: DeepSleepResult): DeepSleepSummary {
     llmCoreMemoriesCreated: result.llmReflection?.coreMemoriesCreated ?? 0,
     llmLongTermPromoted: result.llmReflection?.longTermMemoriesPromoted ?? 0,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workspace Sync
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Sync memory tier files from agent state to workspace markdown files.
+ * This ensures MEMORIES-CORE.md and MEMORIES-LONG.md are always available
+ * for bootstrap loading into agent context.
+ *
+ * Also writes medium-term memories to memory/memories-medium.md so they
+ * get indexed by the memory search system.
+ */
+async function syncMemoriesToWorkspace(params: {
+  agentId: string;
+  workspaceDir: string;
+}): Promise<void> {
+  const { agentId, workspaceDir } = params;
+
+  // Load core memories from agent JSON and convert to workspace format
+  const coreMemories = await getCoreMemories(agentId);
+  if (coreMemories.length > 0) {
+    // Map CoreMemoryTheme to MemoryTheme (they have overlapping values)
+    const themeMap: Record<string, CoreMemoryEntry["theme"]> = {
+      user_preference: "user_preference",
+      user_identity: "user_values", // Map to closest
+      user_values: "user_values",
+      communication_style: "behavioral_pattern",
+      risk_tolerance: "constraint",
+      domain_expertise: "expertise",
+      relationship: "relationship",
+      other: "user_preference", // Default fallback
+    };
+
+    const coreEntries: CoreMemoryEntry[] = coreMemories.map((m) => ({
+      id: m.id,
+      theme: themeMap[m.theme] ?? "user_preference",
+      description: m.summary,
+      confidence: m.confidence,
+      supportingMemoryIds: [], // Not tracked in simple format
+      createdAt: m.createdAt,
+      reinforcedAt: m.updatedAt !== m.createdAt ? m.updatedAt : undefined,
+      reinforcementCount: m.reinforcementCount,
+    }));
+    saveCoreMemoriesToWorkspace(workspaceDir, coreEntries);
+  }
+
+  // Load long-term memories from agent JSON and convert to workspace format
+  const longTermMemories = await getLongTermMemories(agentId);
+  if (longTermMemories.length > 0) {
+    const longTermEntries: LongTermMemoryEntry[] = longTermMemories.map((m) => ({
+      id: m.id,
+      content: m.summary || m.detail?.slice(0, 200) || "",
+      confidence: m.confidence,
+      createdAt: m.createdAt,
+      accessCount: m.reinforcementCount,
+      tags: m.category ? [m.category] : undefined,
+    }));
+    saveLongTermMemoriesToWorkspace(workspaceDir, longTermEntries);
+  }
+
+  // Write medium-term memories to memory/ directory as markdown for search indexing
+  const mediumTermMemories = await getMediumTermMemories(agentId);
+  if (mediumTermMemories.length > 0) {
+    const memoryDir = path.join(workspaceDir, "memory");
+    if (!existsSync(memoryDir)) {
+      mkdirSync(memoryDir, { recursive: true });
+    }
+
+    const mediumTermPath = path.join(memoryDir, "memories-medium.md");
+    const header = `# Medium-Term Memories
+
+These are patterns and learnings that have appeared multiple times.
+Searched when relevant to a conversation but not loaded into every context.
+Promoted to long-term when reinforced enough times.
+
+---
+
+`;
+    const sections = mediumTermMemories.map((m) => {
+      const lines = [
+        `## ${m.summary.slice(0, 60)}${m.summary.length > 60 ? "..." : ""}`,
+        `- **ID**: ${m.id}`,
+        `- **Category**: ${m.category}`,
+        `- **Confidence**: ${(m.confidence * 100).toFixed(0)}%`,
+        `- **Reinforcements**: ${m.reinforcementCount}`,
+        `- **Promoted to long-term**: ${m.promotedToLongTerm ? "Yes" : "No"}`,
+        "",
+        m.detail || m.summary,
+      ];
+      return lines.join("\n");
+    });
+
+    writeFileSync(mediumTermPath, header + sections.join("\n\n---\n\n"), "utf-8");
+  }
 }
