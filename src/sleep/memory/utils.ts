@@ -17,9 +17,10 @@ export function resolveAgentDirForSleep(agentId: string): string {
 
 /**
  * Resolve memory database path for an agent.
+ * Uses the same path as the main memory manager: ~/.openclaw/memory/{agentId}.sqlite
  */
 export function resolveMemoryDbPath(agentId: string): string {
-  return path.join(resolveAgentDirForSleep(agentId), "memory-index.sqlite");
+  return path.join(STATE_DIR, "memory", `${agentId}.sqlite`);
 }
 
 /**

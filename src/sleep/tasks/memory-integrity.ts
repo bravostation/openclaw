@@ -13,6 +13,14 @@ function resolveAgentDirSimple(agentId: string): string {
   return path.join(STATE_DIR, "agents", agentId, "agent");
 }
 
+/**
+ * Resolve memory database path for an agent.
+ * Uses the same path as the main memory manager: ~/.openclaw/memory/{agentId}.sqlite
+ */
+function resolveMemoryDbPathSimple(agentId: string): string {
+  return path.join(STATE_DIR, "memory", `${agentId}.sqlite`);
+}
+
 export const memoryIntegrityTask: ShallowSleepTask = {
   name: "memory-integrity",
   description: "Verify memory store integrity",
@@ -27,8 +35,8 @@ export const memoryIntegrityTask: ShallowSleepTask = {
       const agentId = ctx.agentId ?? "default";
       const agentDir = resolveAgentDirSimple(agentId);
 
-      // Check for memory index database
-      const memoryDbPath = path.join(agentDir, "memory-index.sqlite");
+      // Check for memory index database (uses same path as memory manager)
+      const memoryDbPath = resolveMemoryDbPathSimple(agentId);
 
       try {
         const stat = await fs.stat(memoryDbPath);

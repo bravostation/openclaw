@@ -30,9 +30,10 @@ describe("sleep/memory/utils", () => {
   });
 
   describe("resolveMemoryDbPath", () => {
-    it("returns sqlite path", () => {
+    it("returns sqlite path in memory directory", () => {
       const result = resolveMemoryDbPath("test");
-      expect(result).toContain("memory-index.sqlite");
+      expect(result).toContain("memory");
+      expect(result).toContain("test.sqlite");
     });
   });
 
