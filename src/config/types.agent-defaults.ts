@@ -366,6 +366,23 @@ export type SleepMemoryPromotionConfig = {
   minConfidenceForLongTerm?: number;
 };
 
+export type SleepLlmReflectionConfig = {
+  /** Enable LLM-based memory reflection (default: true). */
+  enabled?: boolean;
+  /** LLM provider (default: "anthropic"). */
+  provider?: string;
+  /** Model to use (default: "claude-opus-4-5"). */
+  model?: string;
+  /** Memories per LLM call (default: 20). */
+  batchSize?: number;
+  /** Timeout per LLM call in ms (default: 60000). */
+  timeoutMs?: number;
+  /** Confidence threshold for pruning decisions (default: 0.7). */
+  pruneConfidenceThreshold?: number;
+  /** Relevance threshold for promotion decisions (default: 0.5). */
+  promoteRelevanceThreshold?: number;
+};
+
 export type SleepDeepConfig = {
   /** Enable deep sleep phase. */
   enabled?: boolean;
@@ -377,6 +394,8 @@ export type SleepDeepConfig = {
   memoryPromotion?: SleepMemoryPromotionConfig;
   /** Core memory extraction settings. */
   coreMemory?: SleepCoreMemoryConfig;
+  /** LLM-based memory reflection settings. */
+  llmReflection?: SleepLlmReflectionConfig;
 };
 
 export type AgentSleepConfig = {

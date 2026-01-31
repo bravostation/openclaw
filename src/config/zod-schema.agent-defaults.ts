@@ -106,6 +106,19 @@ const SleepMemoryPromotionSchema = z
   .strict()
   .optional();
 
+const SleepLlmReflectionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    provider: z.string().optional(),
+    model: z.string().optional(),
+    batchSize: z.number().int().positive().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+    pruneConfidenceThreshold: z.number().min(0).max(1).optional(),
+    promoteRelevanceThreshold: z.number().min(0).max(1).optional(),
+  })
+  .strict()
+  .optional();
+
 const SleepDeepSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -113,6 +126,7 @@ const SleepDeepSchema = z
     memoryCompaction: SleepMemoryCompactionSchema,
     memoryPromotion: SleepMemoryPromotionSchema,
     coreMemory: SleepCoreMemorySchema,
+    llmReflection: SleepLlmReflectionSchema,
   })
   .strict()
   .optional();

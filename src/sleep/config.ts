@@ -3,7 +3,11 @@
  */
 
 import type { OpenClawConfig } from "../config/config.js";
-import type { SleepDeepConfig, SleepShallowConfig } from "../config/types.agent-defaults.js";
+import type {
+  SleepDeepConfig,
+  SleepLlmReflectionConfig,
+  SleepShallowConfig,
+} from "../config/types.agent-defaults.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Defaults
@@ -55,6 +59,15 @@ export const DEFAULT_CORE_MEMORY_MIN_CONFIDENCE = 0.7;
 export const DEFAULT_MEMORY_PROMOTION_ENABLED = true;
 export const DEFAULT_MEMORY_PROMOTION_MIN_REINFORCEMENTS = 3;
 export const DEFAULT_MEMORY_PROMOTION_MIN_CONFIDENCE = 0.7;
+
+// LLM reflection defaults
+export const DEFAULT_LLM_REFLECTION_ENABLED = true;
+export const DEFAULT_LLM_REFLECTION_PROVIDER = "anthropic";
+export const DEFAULT_LLM_REFLECTION_MODEL = "claude-opus-4-5";
+export const DEFAULT_LLM_REFLECTION_BATCH_SIZE = 20;
+export const DEFAULT_LLM_REFLECTION_TIMEOUT_MS = 60_000;
+export const DEFAULT_LLM_REFLECTION_PRUNE_THRESHOLD = 0.7;
+export const DEFAULT_LLM_REFLECTION_PROMOTE_THRESHOLD = 0.5;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resolved Types
@@ -111,6 +124,15 @@ export type ResolvedSleepDeepConfig = {
     enabled: boolean;
     minRecurrence: number;
     minConfidence: number;
+  };
+  llmReflection: {
+    enabled: boolean;
+    provider: string;
+    model: string;
+    batchSize: number;
+    timeoutMs: number;
+    pruneConfidenceThreshold: number;
+    promoteRelevanceThreshold: number;
   };
 };
 
@@ -192,6 +214,22 @@ function resolveShallowConfig(cfg?: SleepShallowConfig): ResolvedSleepShallowCon
   };
 }
 
+function resolveLlmReflectionConfig(
+  cfg?: SleepLlmReflectionConfig,
+): ResolvedSleepDeepConfig["llmReflection"] {
+  return {
+    enabled: cfg?.enabled ?? DEFAULT_LLM_REFLECTION_ENABLED,
+    provider: cfg?.provider ?? DEFAULT_LLM_REFLECTION_PROVIDER,
+    model: cfg?.model ?? DEFAULT_LLM_REFLECTION_MODEL,
+    batchSize: cfg?.batchSize ?? DEFAULT_LLM_REFLECTION_BATCH_SIZE,
+    timeoutMs: cfg?.timeoutMs ?? DEFAULT_LLM_REFLECTION_TIMEOUT_MS,
+    pruneConfidenceThreshold:
+      cfg?.pruneConfidenceThreshold ?? DEFAULT_LLM_REFLECTION_PRUNE_THRESHOLD,
+    promoteRelevanceThreshold:
+      cfg?.promoteRelevanceThreshold ?? DEFAULT_LLM_REFLECTION_PROMOTE_THRESHOLD,
+  };
+}
+
 function resolveDeepConfig(cfg?: SleepDeepConfig): ResolvedSleepDeepConfig {
   return {
     enabled: cfg?.enabled ?? DEFAULT_DEEP_ENABLED,
@@ -217,6 +255,7 @@ function resolveDeepConfig(cfg?: SleepDeepConfig): ResolvedSleepDeepConfig {
       minRecurrence: cfg?.coreMemory?.minRecurrence ?? DEFAULT_CORE_MEMORY_MIN_RECURRENCE,
       minConfidence: cfg?.coreMemory?.minConfidence ?? DEFAULT_CORE_MEMORY_MIN_CONFIDENCE,
     },
+    llmReflection: resolveLlmReflectionConfig(cfg?.llmReflection),
   };
 }
 

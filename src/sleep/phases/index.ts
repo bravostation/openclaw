@@ -16,4 +16,5 @@ export {
   type DeepSleepResult,
   type DeepSleepOptions,
   type DeepSleepSummary,
+  type LlmReflectionResult,
 } from "./deep.js";

@@ -148,6 +148,15 @@ Short-term → Medium-term → Long-term → Core
             enabled: true,
             minRecurrence: 3,          // Pattern recurrence threshold
             minConfidence: 0.7         // Confidence for core promotion
+          },
+          llmReflection: {
+            enabled: true,             // Enable LLM-based memory evaluation
+            provider: "anthropic",     // LLM provider
+            model: "claude-opus-4-5",  // Model (Opus for quality reasoning)
+            batchSize: 20,             // Memories per LLM call
+            timeoutMs: 60000,          // 60s timeout per call
+            pruneConfidenceThreshold: 0.7,   // Confidence to prune
+            promoteRelevanceThreshold: 0.5   // Relevance for promotion
           }
         }
       }
@@ -155,6 +164,32 @@ Short-term → Medium-term → Long-term → Core
   }
 }
 ```
+
+### LLM-Enhanced Memory Operations
+
+When `llmReflection.enabled` is true, deep sleep uses AI to make smarter memory decisions:
+
+1. **Identity-Aware Pruning**: Evaluates memories through the lens of SOUL.md and IDENTITY.md
+2. **Relevance-Based Promotion**: Scores memories by alignment with agent identity
+3. **Core Memory Synthesis**: Identifies patterns that define the agent's character
+
+The LLM receives full context including:
+- SOUL.md (agent personality and values)
+- IDENTITY.md (structured identity metadata)
+- Existing core memories (foundational patterns)
+- Existing long-term memories (stable facts)
+- Medium-term memories (searchable context)
+
+#### Workspace Memory Files
+
+LLM-enhanced operations store memories in the workspace:
+
+| File | Purpose |
+|------|---------|
+| `MEMORIES-CORE.md` | Core memories (identity-shaping, always loaded) |
+| `MEMORIES-LONG.md` | Long-term memories (stable facts, always loaded) |
+
+These files are version-controlled and portable with your agent.
 
 ## Sleep Phases
 
@@ -181,6 +216,7 @@ Runs second, heavier operations with atomic steps:
 3. **Medium-term Processing**: Extract patterns from short-term, reinforce existing
 4. **Long-term Promotion**: Promote reinforced medium-term memories
 5. **Core Memory Extraction**: Identify identity-shaping patterns
+6. **LLM Reflection** (optional): Use AI to evaluate memories through identity lens
 
 ## Sleep Reports
 

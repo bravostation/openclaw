@@ -3,6 +3,9 @@
  *
  * Memory hierarchy:
  *   Short-term (daily chunks) → Medium-term (reinforced) → Long-term (stable) → Core (identity)
+ *
+ * With LLM reflection enabled, memory operations consult the agent's identity
+ * (SOUL.md, IDENTITY.md) to make smarter pruning/promotion decisions.
  */
 
 import type { OpenClawConfig } from "../../config/config.js";
@@ -20,6 +23,19 @@ import {
   type CoreMemoryResult,
   type MediumTermResult,
 } from "../memory/index.js";
+import {
+  prepareReflectionContext,
+  reflectOnPromotion,
+  synthesizeCoreMemories,
+  saveCoreMemoriesToWorkspace,
+  saveLongTermMemoriesToWorkspace,
+  type IdentityContext,
+  type ResolvedLlmReflectionConfig,
+  type ReflectionLogEntry,
+  type CoreMemoryEntry,
+  type LongTermMemoryEntry,
+  type MemoryCandidate,
+} from "../llm/index.js";
 
 const log = createSubsystemLogger("sleep/deep");
 
@@ -34,9 +50,19 @@ export type DeepSleepResult = {
   mediumTerm: MediumTermResult | null;
   promote: PromoteResult | null;
   coreMemory: CoreMemoryResult | null;
+  llmReflection: LlmReflectionResult | null;
   durationMs: number;
   abortReason?: string;
   error?: string;
+};
+
+export type LlmReflectionResult = {
+  enabled: boolean;
+  promotionLog?: ReflectionLogEntry;
+  coreSynthesisLog?: ReflectionLogEntry;
+  coreMemoriesCreated: number;
+  longTermMemoriesPromoted: number;
+  workspaceFilesUpdated: string[];
 };
 
 export type DeepSleepOptions = {
@@ -67,6 +93,7 @@ export async function runDeepSleep(options: DeepSleepOptions): Promise<DeepSleep
       mediumTerm: null,
       promote: null,
       coreMemory: null,
+      llmReflection: null,
       durationMs: 0,
     };
   }
@@ -78,8 +105,38 @@ export async function runDeepSleep(options: DeepSleepOptions): Promise<DeepSleep
   let mediumTermResult: MediumTermResult | null = null;
   let promoteResult: PromoteResult | null = null;
   let coreMemoryResult: CoreMemoryResult | null = null;
+  let llmReflectionResult: LlmReflectionResult | null = null;
   let abortReason: string | undefined;
   let error: string | undefined;
+
+  // Prepare LLM reflection context if enabled
+  let identityContext: IdentityContext | undefined;
+  let llmConfig: ResolvedLlmReflectionConfig | undefined;
+  const llmEnabled = sleepCfg.deep.llmReflection.enabled && workspaceDir;
+
+  if (llmEnabled && workspaceDir) {
+    try {
+      log.debug("Loading identity context for LLM reflection");
+      const { resolveAgentDir } = await import("../../agents/agent-scope.js");
+      const agentDir = resolveAgentDir(options.cfg, agentId);
+      const ctx = await prepareReflectionContext({
+        workspaceDir,
+        agentDir,
+        cfg: options.cfg,
+        signal,
+      });
+      identityContext = ctx.identityContext;
+      llmConfig = ctx.config;
+      log.debug(
+        `Identity context loaded: soul=${!!identityContext.soul}, ` +
+          `identity=${!!identityContext.identity}, ` +
+          `core=${identityContext.coreMemories.length}, ` +
+          `longTerm=${identityContext.longTermMemories.length}`,
+      );
+    } catch (err) {
+      log.warn(`Failed to load identity context: ${String(err)}`);
+    }
+  }
 
   try {
     // Phase 1: Prune old memories (removes stale short-term chunks)
@@ -190,6 +247,27 @@ export async function runDeepSleep(options: DeepSleepOptions): Promise<DeepSleep
       options.onPhaseComplete?.("coreMemory", coreMemoryResult);
       log.debug(`Core memory extraction complete: ${coreMemoryResult.newMemoriesCreated} new`);
     }
+
+    // Phase 6: LLM-based reflection (optional, uses identity context)
+    if (identityContext && llmConfig && workspaceDir && !signal?.aborted) {
+      log.debug("Starting LLM-based memory reflection");
+      options.onPhaseStart?.("llmReflection");
+
+      llmReflectionResult = await runLlmReflection({
+        cfg: options.cfg,
+        workspaceDir,
+        identityContext,
+        llmConfig,
+        signal,
+        dryRun,
+      });
+
+      options.onPhaseComplete?.("llmReflection", llmReflectionResult);
+      log.debug(
+        `LLM reflection complete: ${llmReflectionResult.coreMemoriesCreated} core memories, ` +
+          `${llmReflectionResult.longTermMemoriesPromoted} long-term promoted`,
+      );
+    }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
     log.error(`Deep sleep failed: ${error}`);
@@ -207,10 +285,157 @@ export async function runDeepSleep(options: DeepSleepOptions): Promise<DeepSleep
     mediumTerm: mediumTermResult,
     promote: promoteResult,
     coreMemory: coreMemoryResult,
+    llmReflection: llmReflectionResult,
     durationMs,
     abortReason,
     error,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LLM Reflection Phase
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runLlmReflection(params: {
+  cfg: OpenClawConfig;
+  workspaceDir: string;
+  identityContext: IdentityContext;
+  llmConfig: ResolvedLlmReflectionConfig;
+  signal?: AbortSignal;
+  dryRun?: boolean;
+}): Promise<LlmReflectionResult> {
+  const { cfg, workspaceDir, identityContext, llmConfig, signal, dryRun } = params;
+
+  const result: LlmReflectionResult = {
+    enabled: true,
+    coreMemoriesCreated: 0,
+    longTermMemoriesPromoted: 0,
+    workspaceFilesUpdated: [],
+  };
+
+  // Convert medium-term memories to candidates for promotion review
+  const promotionCandidates: MemoryCandidate[] = identityContext.mediumTermMemories
+    .filter((m) => m.reinforcementCount >= 2) // Only consider reinforced memories
+    .map((m) => ({
+      id: m.id,
+      content: m.content,
+      tier: "medium" as const,
+      timestamp: m.createdAt,
+      accessCount: m.accessCount,
+      confidence: m.confidence,
+    }));
+
+  // Step 1: LLM-guided promotion from medium-term to long-term
+  if (promotionCandidates.length > 0 && !signal?.aborted) {
+    try {
+      log.debug(`Evaluating ${promotionCandidates.length} memories for promotion`);
+
+      const { results, log: promotionLog } = await reflectOnPromotion({
+        memories: promotionCandidates,
+        identityContext,
+        config: llmConfig,
+        cfg,
+        signal,
+      });
+
+      result.promotionLog = promotionLog;
+
+      // Find memories that scored high enough for promotion
+      const toPromote = results.filter((r) => r.relevance >= llmConfig.promoteRelevanceThreshold);
+
+      if (toPromote.length > 0 && !dryRun) {
+        // Get existing long-term memories
+        const existingLongTerm = [...identityContext.longTermMemories];
+
+        // Add new long-term memories
+        const nowMs = Date.now();
+        for (const promoted of toPromote) {
+          const source = identityContext.mediumTermMemories.find((m) => m.id === promoted.id);
+          if (source) {
+            const newLongTerm: LongTermMemoryEntry = {
+              id: `lt-${nowMs}-${existingLongTerm.length}`,
+              content: source.content,
+              confidence: promoted.relevance,
+              createdAt: nowMs,
+              accessCount: source.accessCount,
+              tags: source.tags,
+            };
+            existingLongTerm.push(newLongTerm);
+            result.longTermMemoriesPromoted++;
+          }
+        }
+
+        // Save to workspace
+        saveLongTermMemoriesToWorkspace(workspaceDir, existingLongTerm);
+        result.workspaceFilesUpdated.push("MEMORIES-LONG.md");
+
+        log.debug(`Promoted ${result.longTermMemoriesPromoted} memories to long-term`);
+      }
+    } catch (err) {
+      log.warn(`LLM promotion reflection failed: ${String(err)}`);
+    }
+  }
+
+  // Step 2: LLM-guided core memory synthesis
+  if (identityContext.longTermMemories.length > 0 && !signal?.aborted) {
+    try {
+      log.debug(
+        `Synthesizing core memories from ${identityContext.longTermMemories.length} long-term memories`,
+      );
+
+      const { results, log: synthesisLog } = await synthesizeCoreMemories({
+        longTermMemories: identityContext.longTermMemories,
+        identityContext,
+        config: llmConfig,
+        cfg,
+        signal,
+      });
+
+      result.coreSynthesisLog = synthesisLog;
+
+      if (results.length > 0 && !dryRun) {
+        // Get existing core memories
+        const existingCore = [...identityContext.coreMemories];
+        const nowMs = Date.now();
+
+        for (const synthesis of results) {
+          // Check if this reinforces an existing core memory
+          if (synthesis.reinforcesExisting) {
+            const existing = existingCore.find((m) => m.id === synthesis.reinforcesExisting);
+            if (existing) {
+              existing.reinforcedAt = nowMs;
+              existing.reinforcementCount = (existing.reinforcementCount ?? 0) + 1;
+              existing.confidence = Math.min(1, existing.confidence + 0.1);
+              log.debug(`Reinforced existing core memory: ${existing.id}`);
+            }
+          } else {
+            // Create new core memory
+            const newCore: CoreMemoryEntry = {
+              id: `cm-${nowMs}-${existingCore.length}`,
+              theme: synthesis.theme,
+              description: synthesis.description,
+              confidence: synthesis.confidence,
+              supportingMemoryIds: synthesis.supportingMemoryIds,
+              createdAt: nowMs,
+            };
+            existingCore.push(newCore);
+            result.coreMemoriesCreated++;
+            log.debug(
+              `Created new core memory: ${synthesis.theme} - ${synthesis.description.slice(0, 50)}...`,
+            );
+          }
+        }
+
+        // Save to workspace
+        saveCoreMemoriesToWorkspace(workspaceDir, existingCore);
+        result.workspaceFilesUpdated.push("MEMORIES-CORE.md");
+      }
+    } catch (err) {
+      log.warn(`LLM core synthesis failed: ${String(err)}`);
+    }
+  }
+
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,6 +453,9 @@ export type DeepSleepSummary = {
   memoriesPromoted: number;
   coreMemoriesCreated: number;
   coreMemoriesReinforced: number;
+  llmReflectionEnabled: boolean;
+  llmCoreMemoriesCreated: number;
+  llmLongTermPromoted: number;
 };
 
 export function summarizeDeepSleep(result: DeepSleepResult): DeepSleepSummary {
@@ -247,5 +475,8 @@ export function summarizeDeepSleep(result: DeepSleepResult): DeepSleepSummary {
     memoriesPromoted: result.promote?.memoriesPromoted ?? 0,
     coreMemoriesCreated: result.coreMemory?.newMemoriesCreated ?? 0,
     coreMemoriesReinforced: result.coreMemory?.memoriesReinforced ?? 0,
+    llmReflectionEnabled: result.llmReflection?.enabled ?? false,
+    llmCoreMemoriesCreated: result.llmReflection?.coreMemoriesCreated ?? 0,
+    llmLongTermPromoted: result.llmReflection?.longTermMemoriesPromoted ?? 0,
   };
 }

@@ -131,3 +131,36 @@ export {
   errorItem,
   criticalItem,
 } from "./tasks/types.js";
+
+// LLM Reflection
+export {
+  // Types
+  type CoreMemoryEntry,
+  type CoreMemorySynthesisResult,
+  type IdentityContext,
+  type LongTermMemoryEntry,
+  type MediumTermMemoryEntry,
+  type MemoryCandidate,
+  type MemoryTheme,
+  type MemoryTier,
+  type PromotionReflectionResult,
+  type PruneReflectionResult,
+  type ReflectionLogEntry,
+  type ResolvedLlmReflectionConfig,
+  type SleepLlmReflectionConfig,
+  // Identity context
+  loadIdentityContext,
+  loadCoreMemoriesFromWorkspace,
+  loadLongTermMemoriesFromWorkspace,
+  saveCoreMemoriesToWorkspace,
+  saveLongTermMemoriesToWorkspace,
+  CORE_MEMORIES_FILENAME,
+  LONG_TERM_MEMORIES_FILENAME,
+  // Reflection
+  reflectOnPruning,
+  reflectOnPromotion,
+  synthesizeCoreMemories,
+  prepareReflectionContext,
+  isLlmReflectionEnabled,
+  type ReflectionContext,
+} from "./llm/index.js";
