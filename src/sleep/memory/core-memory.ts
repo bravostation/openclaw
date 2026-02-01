@@ -245,6 +245,13 @@ export async function extractCoreMemories(options: CoreMemoryOptions): Promise<C
       existingMemory.updatedAt = nowMs;
       memoriesReinforced++;
     } else {
+      // Check maxPerCycle limit
+      const maxPerCycle = deepCfg.coreMemory.maxPerCycle;
+      if (newMemoriesCreated >= maxPerCycle) {
+        log.debug(`Reached maxPerCycle (${maxPerCycle}) for core memory creation`);
+        continue;
+      }
+
       // Create new core memory
       const newMemory: CoreMemory = {
         id: `core-${nowMs}-${newMemoriesCreated}`,
@@ -268,10 +275,12 @@ export async function extractCoreMemories(options: CoreMemoryOptions): Promise<C
   }
 
   const durationMs = Date.now() - startMs;
+  const maxPerCycle = deepCfg.coreMemory.maxPerCycle;
 
   log.info(
     `Core memory extraction complete: ${existing.length} total, ` +
-      `${newMemoriesCreated} new, ${memoriesReinforced} reinforced (${durationMs}ms)`,
+      `${newMemoriesCreated} new${newMemoriesCreated >= maxPerCycle ? ` (capped at ${maxPerCycle}/cycle)` : ""}, ` +
+      `${memoriesReinforced} reinforced (${durationMs}ms)`,
   );
 
   return {

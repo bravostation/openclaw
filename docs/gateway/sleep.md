@@ -164,22 +164,29 @@ workspace/
           enabled: true,
           memoryPruning: {
             enabled: true,
-            maxAgeHours: 168,          // 7 days
-            decayFactor: 0.1           // Decay rate for relevance
+            maxAgeHours: 168,              // 7 days
+            decayFactor: 0.1,              // Decay rate for relevance
+            gracePeriodHours: 24,          // Min age before any pruning
+            maxPrunePercentPerCycle: 20,   // Max 20% pruned per cycle
+            fuzziness: 0.1                 // Threshold variance (10%)
           },
           memoryCompaction: {
             enabled: true,
-            minChunks: 100             // Min chunks before compaction
+            minChunks: 100                 // Min chunks before compaction
           },
           memoryPromotion: {
             enabled: true,
-            minReinforcementsForLongTerm: 3,  // Reinforcements needed
-            minConfidenceForLongTerm: 0.7     // Confidence threshold
+            minReinforcementsForLongTerm: 3,    // Reinforcements needed
+            minConfidenceForLongTerm: 0.7,      // Confidence threshold
+            minAgeHoursForPromotion: 48,        // 2 days before eligible
+            maxPromotePercentPerCycle: 30,      // Max 30% promoted per cycle
+            fuzziness: 0.1                      // Threshold variance (10%)
           },
           coreMemory: {
             enabled: true,
-            minRecurrence: 3,          // Pattern recurrence threshold
-            minConfidence: 0.7         // Confidence for core promotion
+            minRecurrence: 3,              // Pattern recurrence threshold
+            minConfidence: 0.7,            // Confidence for core promotion
+            maxPerCycle: 5                 // Max new core memories per cycle
           },
           llmReflection: {
             enabled: true,             // Enable LLM-based memory evaluation
@@ -195,6 +202,27 @@ workspace/
     }
   }
 }
+```
+
+### Memory Safeguards
+
+The sleep system includes safeguards to prevent over-aggressive memory operations:
+
+#### Pruning Safeguards
+
+- **Grace Period**: Memories younger than `gracePeriodHours` are never pruned, giving them time to be reinforced
+- **Per-Cycle Limit**: `maxPrunePercentPerCycle` caps the percentage of memories that can be pruned in a single sleep cycle
+- **Fuzziness**: Adds variance to thresholds, preventing cliff effects where memories at exact boundaries are always pruned
+
+#### Promotion Safeguards
+
+- **Minimum Age**: `minAgeHoursForPromotion` ensures memories have been stable before promotion
+- **Per-Cycle Limit**: `maxPromotePercentPerCycle` prevents overwhelming long-term storage
+- **Fuzziness**: Applies variance to confidence thresholds
+
+#### Core Memory Safeguards
+
+- **Per-Cycle Limit**: `maxPerCycle` limits how many new core memories can be created per cycle (reinforcements are unlimited)
 ```
 
 ### LLM-Enhanced Memory Operations

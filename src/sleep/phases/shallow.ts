@@ -18,6 +18,8 @@ import {
   developmentRadarTask,
   apiKeyValidationTask,
   systemDependenciesTask,
+  doctorIntegrationTask,
+  packageManagerTask,
 } from "../tasks/index.js";
 
 const log = createSubsystemLogger("sleep/shallow");
@@ -73,6 +75,9 @@ function getEnabledTasks(sleepCfg: ResolvedSleepConfig): ShallowSleepTask[] {
     if (shallow.tasks.apiKeyValidation) {
       tasks.push(apiKeyValidationTask);
     }
+    if (shallow.tasks.doctorIntegration) {
+      tasks.push(doctorIntegrationTask);
+    }
   }
 
   // Update tasks
@@ -80,6 +85,9 @@ function getEnabledTasks(sleepCfg: ResolvedSleepConfig): ShallowSleepTask[] {
     tasks.push(updateCheckTask);
     if (shallow.updates.checkSystemDependencies) {
       tasks.push(systemDependenciesTask);
+    }
+    if (shallow.updates.checkPackageManager) {
+      tasks.push(packageManagerTask);
     }
   }
 

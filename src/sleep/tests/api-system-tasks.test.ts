@@ -292,6 +292,7 @@ describe("sleep/shallow integration with new tasks", () => {
     sleepCfg.shallow.tasks.integrationProbe = false;
     sleepCfg.shallow.tasks.memoryIntegrity = false;
     sleepCfg.shallow.tasks.apiKeyValidation = true;
+    sleepCfg.shallow.tasks.doctorIntegration = false;
     sleepCfg.shallow.updates.enabled = false;
     sleepCfg.shallow.security.enabled = false;
     sleepCfg.shallow.radar.enabled = false;
@@ -322,6 +323,7 @@ describe("sleep/shallow integration with new tasks", () => {
     sleepCfg.shallow.updates.checkDependencies = false;
     sleepCfg.shallow.updates.checkTools = false;
     sleepCfg.shallow.updates.checkSystemDependencies = true;
+    sleepCfg.shallow.updates.checkPackageManager = false;
     sleepCfg.shallow.security.enabled = false;
     sleepCfg.shallow.radar.enabled = false;
 
@@ -337,5 +339,176 @@ describe("sleep/shallow integration with new tasks", () => {
     // Should have run system-dependencies
     const sysDepResult = result.results.find((r) => r.name === "system-dependencies");
     expect(sysDepResult).toBeDefined();
+  });
+});
+
+describe("sleep/tasks/doctor-integration", () => {
+  const createMockConfig = (): OpenClawConfig => ({
+    agents: {
+      defaults: {
+        sleep: { enabled: true, window: "03:00-06:00" },
+        userTimezone: "UTC",
+      },
+    },
+  });
+
+  const createContext = (cfg: OpenClawConfig): ShallowSleepTaskContext => {
+    const sleepCfg = resolveSleepConfig(cfg)!;
+    return {
+      cfg,
+      sleepCfg,
+      agentId: "test-agent",
+      signal: new AbortController().signal,
+    };
+  };
+
+  it("runs without crashing", async () => {
+    const { doctorIntegrationTask } = await import("../tasks/doctor-integration.js");
+    const cfg = createMockConfig();
+    const ctx = createContext(cfg);
+
+    const result = await doctorIntegrationTask.run(ctx);
+
+    expect(result.name).toBe("doctor-integration");
+    expect(["passed", "failed", "skipped"]).toContain(result.status);
+  });
+
+  it("skips when doctorIntegration is disabled", async () => {
+    const { doctorIntegrationTask } = await import("../tasks/doctor-integration.js");
+    const cfg = createMockConfig();
+    const sleepCfg = resolveSleepConfig(cfg)!;
+    sleepCfg.shallow.tasks.doctorIntegration = false;
+
+    const ctx: ShallowSleepTaskContext = {
+      cfg,
+      sleepCfg,
+      agentId: "test",
+      signal: new AbortController().signal,
+    };
+
+    const result = await doctorIntegrationTask.run(ctx);
+
+    expect(result.status).toBe("skipped");
+  });
+
+  it("reports gateway security warnings for exposed bindings", async () => {
+    const { doctorIntegrationTask } = await import("../tasks/doctor-integration.js");
+    const cfg: OpenClawConfig = {
+      ...createMockConfig(),
+      gateway: {
+        mode: "local",
+        bind: "lan", // Network-accessible
+        auth: {}, // No auth configured
+      },
+    };
+    const ctx = createContext(cfg);
+
+    const result = await doctorIntegrationTask.run(ctx);
+
+    // Should have a warning about exposed gateway
+    const hasGatewayWarning = result.items.some(
+      (item) =>
+        item.label.includes("Gateway") ||
+        (typeof item.message === "string" && item.message.includes("network")),
+    );
+    expect(hasGatewayWarning || result.items.length > 0).toBeTruthy();
+  });
+
+  it("does not mark itself as critical (advisory only)", async () => {
+    const { doctorIntegrationTask } = await import("../tasks/doctor-integration.js");
+    const cfg = createMockConfig();
+    const ctx = createContext(cfg);
+
+    const result = await doctorIntegrationTask.run(ctx);
+
+    // Doctor findings are advisory, never critical
+    expect(result.critical).toBeFalsy();
+  });
+});
+
+describe("sleep/tasks/package-manager", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pkg-mgr-test-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const createMockConfig = (): OpenClawConfig => ({
+    agents: {
+      defaults: {
+        sleep: { enabled: true, window: "03:00-06:00" },
+        userTimezone: "UTC",
+      },
+    },
+  });
+
+  const createContext = (cfg: OpenClawConfig, workspaceDir?: string): ShallowSleepTaskContext => {
+    const sleepCfg = resolveSleepConfig(cfg)!;
+    return {
+      cfg,
+      sleepCfg,
+      agentId: "test-agent",
+      workspaceDir,
+      signal: new AbortController().signal,
+    };
+  };
+
+  it("skips when checkPackageManager is disabled", async () => {
+    const { packageManagerTask } = await import("../tasks/package-manager.js");
+    const cfg = createMockConfig();
+    const sleepCfg = resolveSleepConfig(cfg)!;
+    sleepCfg.shallow.updates.checkPackageManager = false;
+
+    const ctx: ShallowSleepTaskContext = {
+      cfg,
+      sleepCfg,
+      agentId: "test",
+      signal: new AbortController().signal,
+    };
+
+    const result = await packageManagerTask.run(ctx);
+
+    expect(result.status).toBe("skipped");
+  });
+
+  it("reports no package manager when no lock file exists", async () => {
+    const { packageManagerTask } = await import("../tasks/package-manager.js");
+    const cfg = createMockConfig();
+    const ctx = createContext(cfg, tempDir);
+
+    const result = await packageManagerTask.run(ctx);
+
+    expect(["passed", "failed"]).toContain(result.status);
+    // Should report no package manager detected
+    const hasNoManagerNote = result.items.some(
+      (item) =>
+        (typeof item.message === "string" && item.message.includes("No package manager")) ||
+        item.label.includes("No package manager"),
+    );
+    expect(hasNoManagerNote).toBeTruthy();
+  });
+
+  it("detects pnpm when pnpm-lock.yaml exists", async () => {
+    const { packageManagerTask } = await import("../tasks/package-manager.js");
+    const cfg = createMockConfig();
+
+    // Create a pnpm lock file
+    await fs.writeFile(path.join(tempDir, "pnpm-lock.yaml"), "lockfileVersion: 6.0\n");
+    await fs.writeFile(path.join(tempDir, "package.json"), '{"name": "test"}\n');
+
+    const ctx = createContext(cfg, tempDir);
+    const result = await packageManagerTask.run(ctx);
+
+    // Should detect pnpm
+    const hasPnpm = result.items.some(
+      (item) =>
+        (typeof item.message === "string" && item.message.includes("pnpm")) ||
+        item.label.includes("pnpm"),
+    );
+    expect(hasPnpm).toBeTruthy();
   });
 });

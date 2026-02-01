@@ -265,10 +265,14 @@ describe("sleep/shallow-health-report", () => {
     const cfg = createMockConfig();
     const sleepCfg = resolveSleepConfig(cfg)!;
 
-    // Disable network-heavy tasks
+    // Disable network-heavy and system-dependent tasks
     sleepCfg.shallow.tasks.integrationProbe = false;
+    sleepCfg.shallow.tasks.apiKeyValidation = false;
+    sleepCfg.shallow.tasks.doctorIntegration = false;
     sleepCfg.shallow.updates.checkOpenclaw = false;
     sleepCfg.shallow.updates.checkDependencies = false;
+    sleepCfg.shallow.updates.checkSystemDependencies = false;
+    sleepCfg.shallow.updates.checkPackageManager = false;
     sleepCfg.shallow.security.npmAudit = false;
     sleepCfg.shallow.security.advisoryCheck = false;
     sleepCfg.shallow.radar.enabled = false;
@@ -304,6 +308,8 @@ describe("sleep/shallow-health-report", () => {
     sleepCfg.shallow.tasks.credentialsCheck = false;
     sleepCfg.shallow.tasks.integrationProbe = false;
     sleepCfg.shallow.tasks.memoryIntegrity = false;
+    sleepCfg.shallow.tasks.apiKeyValidation = false;
+    sleepCfg.shallow.tasks.doctorIntegration = false;
     sleepCfg.shallow.updates.enabled = false;
     sleepCfg.shallow.security.enabled = false;
     sleepCfg.shallow.radar.enabled = false;

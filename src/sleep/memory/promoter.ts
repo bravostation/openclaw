@@ -48,14 +48,18 @@ type MemoryCandidate = {
  * - Frequently accessed chunks
  * - Chunks with high relevance scores in past searches
  * - Chunks containing user preferences or decisions
+ * - Chunks old enough to be considered stable (minAgeMs)
  */
 async function findPromotionCandidates(params: {
   dbPath: string;
   minAccessCount: number;
+  minAgeMs: number;
   signal?: AbortSignal;
 }): Promise<MemoryCandidate[]> {
-  const { dbPath, minAccessCount: _minAccessCount, signal } = params;
+  const { dbPath, minAccessCount: _minAccessCount, minAgeMs, signal } = params;
   const candidates: MemoryCandidate[] = [];
+  const nowMs = Date.now();
+  const cutoffSec = Math.floor((nowMs - minAgeMs) / 1000);
 
   try {
     await fs.access(dbPath);
@@ -68,7 +72,7 @@ async function findPromotionCandidates(params: {
     const db = new DatabaseSync(dbPath, { readOnly: true });
 
     try {
-      // Look for chunks that have been accessed frequently
+      // Look for chunks that meet minimum age requirement
       // Note: This requires tracking access in the chunks table
       // For now, we use a heuristic based on chunk content patterns
 
@@ -76,11 +80,11 @@ async function findPromotionCandidates(params: {
         .prepare(
           `SELECT text, path as source, updated_at
           FROM chunks
-          WHERE length(text) > 100
+          WHERE length(text) > 100 AND updated_at < ?
           ORDER BY updated_at DESC
           LIMIT 100`,
         )
-        .all() as Array<{ text: string; source: string; updated_at: number }>;
+        .all(cutoffSec) as Array<{ text: string; source: string; updated_at: number }>;
 
       for (const row of rows) {
         if (signal?.aborted) {
@@ -181,12 +185,23 @@ ${candidate.text.slice(0, 500)}${candidate.text.length > 500 ? "..." : ""}
 // Main Entry Point
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Apply fuzziness to a threshold value.
+ * Returns value +/- (fuzziness * value) randomly.
+ */
+function applyFuzziness(value: number, fuzziness: number): number {
+  if (fuzziness <= 0) return value;
+  const variance = value * fuzziness;
+  const offset = (Math.random() * 2 - 1) * variance;
+  return Math.max(0, Math.min(1, value + offset)); // Clamp to 0-1 for confidence
+}
+
 export async function promoteMemories(options: PromoteOptions): Promise<PromoteResult> {
   const startMs = Date.now();
   const { agentId, workspaceDir, deepCfg, signal, dryRun } = options;
 
-  // Promotion is not enabled as a separate config, it's part of deep sleep
-  if (!deepCfg.enabled) {
+  // Check if promotion is enabled
+  if (!deepCfg.enabled || !deepCfg.memoryPromotion.enabled) {
     return {
       candidatesEvaluated: 0,
       memoriesPromoted: 0,
@@ -194,13 +209,30 @@ export async function promoteMemories(options: PromoteOptions): Promise<PromoteR
     };
   }
 
+  const {
+    minReinforcementsForLongTerm,
+    minConfidenceForLongTerm,
+    minAgeHoursForPromotion,
+    maxPromotePercentPerCycle,
+    fuzziness,
+  } = deepCfg.memoryPromotion;
+
   const dbPath = resolveMemoryDbPath(agentId);
 
-  log.info(`Evaluating memories for promotion (agent: ${agentId})`);
+  // Apply fuzziness to the confidence threshold
+  const effectiveConfidence = applyFuzziness(minConfidenceForLongTerm, fuzziness);
+  const minAgeMs = minAgeHoursForPromotion * 60 * 60 * 1000;
+
+  log.info(
+    `Evaluating memories for promotion (agent: ${agentId}, ` +
+      `minAge: ${minAgeHoursForPromotion}h, minConf: ${effectiveConfidence.toFixed(2)}, ` +
+      `maxPromote: ${maxPromotePercentPerCycle}%)`,
+  );
 
   const candidates = await findPromotionCandidates({
     dbPath,
-    minAccessCount: 2,
+    minAccessCount: minReinforcementsForLongTerm,
+    minAgeMs,
     signal,
   });
 
@@ -213,8 +245,21 @@ export async function promoteMemories(options: PromoteOptions): Promise<PromoteR
     };
   }
 
-  // Only promote top candidates
-  const toPromote = candidates.slice(0, 5).filter((c) => c.score >= 0.5);
+  // Filter by effective confidence and calculate max to promote
+  const eligible = candidates.filter((c) => c.score >= effectiveConfidence);
+  const maxToPromote = Math.max(
+    1,
+    Math.floor((candidates.length * maxPromotePercentPerCycle) / 100),
+  );
+  const toPromote = eligible.slice(0, maxToPromote);
+
+  if (eligible.length > toPromote.length) {
+    log.info(
+      `Promotion limited: ${toPromote.length}/${eligible.length} eligible memories ` +
+        `(max ${maxPromotePercentPerCycle}% per cycle)`,
+    );
+  }
+
   let promoted = 0;
 
   if (workspaceDir && toPromote.length > 0) {

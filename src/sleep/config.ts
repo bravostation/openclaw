@@ -26,12 +26,14 @@ export const DEFAULT_TASKS_CREDENTIALS_CHECK = true;
 export const DEFAULT_TASKS_INTEGRATION_PROBE = true;
 export const DEFAULT_TASKS_MEMORY_INTEGRITY = true;
 export const DEFAULT_TASKS_API_KEY_VALIDATION = true;
+export const DEFAULT_TASKS_DOCTOR_INTEGRATION = true;
 
 export const DEFAULT_UPDATES_ENABLED = true;
 export const DEFAULT_UPDATES_CHECK_OPENCLAW = true;
 export const DEFAULT_UPDATES_CHECK_DEPENDENCIES = true;
 export const DEFAULT_UPDATES_CHECK_TOOLS = true;
 export const DEFAULT_UPDATES_CHECK_SYSTEM_DEPENDENCIES = true;
+export const DEFAULT_UPDATES_CHECK_PACKAGE_MANAGER = true;
 export const DEFAULT_UPDATES_AUTO_UPDATE = false; // Never auto-update
 
 export const DEFAULT_SECURITY_ENABLED = true;
@@ -50,6 +52,9 @@ export const DEFAULT_DEEP_ENABLED = true;
 export const DEFAULT_MEMORY_PRUNING_ENABLED = true;
 export const DEFAULT_MEMORY_PRUNING_MAX_AGE_HOURS = 168; // 7 days
 export const DEFAULT_MEMORY_PRUNING_DECAY_FACTOR = 0.1;
+export const DEFAULT_MEMORY_PRUNING_GRACE_PERIOD_HOURS = 24; // Min age before pruning
+export const DEFAULT_MEMORY_PRUNING_MAX_PERCENT_PER_CYCLE = 20; // Max 20% pruned per cycle
+export const DEFAULT_MEMORY_PRUNING_FUZZINESS = 0.1; // 10% variance
 
 export const DEFAULT_MEMORY_COMPACTION_ENABLED = true;
 export const DEFAULT_MEMORY_COMPACTION_MIN_CHUNKS = 100;
@@ -57,11 +62,15 @@ export const DEFAULT_MEMORY_COMPACTION_MIN_CHUNKS = 100;
 export const DEFAULT_CORE_MEMORY_ENABLED = true;
 export const DEFAULT_CORE_MEMORY_MIN_RECURRENCE = 3;
 export const DEFAULT_CORE_MEMORY_MIN_CONFIDENCE = 0.7;
+export const DEFAULT_CORE_MEMORY_MAX_PER_CYCLE = 5;
 
 // Medium-term memory promotion defaults
 export const DEFAULT_MEMORY_PROMOTION_ENABLED = true;
 export const DEFAULT_MEMORY_PROMOTION_MIN_REINFORCEMENTS = 3;
 export const DEFAULT_MEMORY_PROMOTION_MIN_CONFIDENCE = 0.7;
+export const DEFAULT_MEMORY_PROMOTION_MIN_AGE_HOURS = 48; // 2 days before promotion
+export const DEFAULT_MEMORY_PROMOTION_MAX_PERCENT_PER_CYCLE = 30; // Max 30% promoted per cycle
+export const DEFAULT_MEMORY_PROMOTION_FUZZINESS = 0.1; // 10% variance
 
 // LLM reflection defaults
 export const DEFAULT_LLM_REFLECTION_ENABLED = true;
@@ -85,6 +94,7 @@ export type ResolvedSleepShallowConfig = {
     integrationProbe: boolean;
     memoryIntegrity: boolean;
     apiKeyValidation: boolean;
+    doctorIntegration: boolean;
   };
   updates: {
     enabled: boolean;
@@ -92,6 +102,7 @@ export type ResolvedSleepShallowConfig = {
     checkDependencies: boolean;
     checkTools: boolean;
     checkSystemDependencies: boolean;
+    checkPackageManager: boolean;
     autoUpdate: boolean;
   };
   security: {
@@ -117,6 +128,9 @@ export type ResolvedSleepDeepConfig = {
     enabled: boolean;
     maxAgeHours: number;
     decayFactor: number;
+    gracePeriodHours: number;
+    maxPrunePercentPerCycle: number;
+    fuzziness: number;
   };
   memoryCompaction: {
     enabled: boolean;
@@ -126,11 +140,15 @@ export type ResolvedSleepDeepConfig = {
     enabled: boolean;
     minReinforcementsForLongTerm: number;
     minConfidenceForLongTerm: number;
+    minAgeHoursForPromotion: number;
+    maxPromotePercentPerCycle: number;
+    fuzziness: number;
   };
   coreMemory: {
     enabled: boolean;
     minRecurrence: number;
     minConfidence: number;
+    maxPerCycle: number;
   };
   llmReflection: {
     enabled: boolean;
@@ -198,6 +216,7 @@ function resolveShallowConfig(cfg?: SleepShallowConfig): ResolvedSleepShallowCon
       integrationProbe: cfg?.tasks?.integrationProbe ?? DEFAULT_TASKS_INTEGRATION_PROBE,
       memoryIntegrity: cfg?.tasks?.memoryIntegrity ?? DEFAULT_TASKS_MEMORY_INTEGRITY,
       apiKeyValidation: cfg?.tasks?.apiKeyValidation ?? DEFAULT_TASKS_API_KEY_VALIDATION,
+      doctorIntegration: cfg?.tasks?.doctorIntegration ?? DEFAULT_TASKS_DOCTOR_INTEGRATION,
     },
     updates: {
       enabled: cfg?.updates?.enabled ?? DEFAULT_UPDATES_ENABLED,
@@ -206,6 +225,8 @@ function resolveShallowConfig(cfg?: SleepShallowConfig): ResolvedSleepShallowCon
       checkTools: cfg?.updates?.checkTools ?? DEFAULT_UPDATES_CHECK_TOOLS,
       checkSystemDependencies:
         cfg?.updates?.checkSystemDependencies ?? DEFAULT_UPDATES_CHECK_SYSTEM_DEPENDENCIES,
+      checkPackageManager:
+        cfg?.updates?.checkPackageManager ?? DEFAULT_UPDATES_CHECK_PACKAGE_MANAGER,
       autoUpdate: cfg?.updates?.autoUpdate ?? DEFAULT_UPDATES_AUTO_UPDATE,
     },
     security: {
@@ -249,6 +270,11 @@ function resolveDeepConfig(cfg?: SleepDeepConfig): ResolvedSleepDeepConfig {
       enabled: cfg?.memoryPruning?.enabled ?? DEFAULT_MEMORY_PRUNING_ENABLED,
       maxAgeHours: cfg?.memoryPruning?.maxAgeHours ?? DEFAULT_MEMORY_PRUNING_MAX_AGE_HOURS,
       decayFactor: cfg?.memoryPruning?.decayFactor ?? DEFAULT_MEMORY_PRUNING_DECAY_FACTOR,
+      gracePeriodHours:
+        cfg?.memoryPruning?.gracePeriodHours ?? DEFAULT_MEMORY_PRUNING_GRACE_PERIOD_HOURS,
+      maxPrunePercentPerCycle:
+        cfg?.memoryPruning?.maxPrunePercentPerCycle ?? DEFAULT_MEMORY_PRUNING_MAX_PERCENT_PER_CYCLE,
+      fuzziness: cfg?.memoryPruning?.fuzziness ?? DEFAULT_MEMORY_PRUNING_FUZZINESS,
     },
     memoryCompaction: {
       enabled: cfg?.memoryCompaction?.enabled ?? DEFAULT_MEMORY_COMPACTION_ENABLED,
@@ -261,11 +287,18 @@ function resolveDeepConfig(cfg?: SleepDeepConfig): ResolvedSleepDeepConfig {
         DEFAULT_MEMORY_PROMOTION_MIN_REINFORCEMENTS,
       minConfidenceForLongTerm:
         cfg?.memoryPromotion?.minConfidenceForLongTerm ?? DEFAULT_MEMORY_PROMOTION_MIN_CONFIDENCE,
+      minAgeHoursForPromotion:
+        cfg?.memoryPromotion?.minAgeHoursForPromotion ?? DEFAULT_MEMORY_PROMOTION_MIN_AGE_HOURS,
+      maxPromotePercentPerCycle:
+        cfg?.memoryPromotion?.maxPromotePercentPerCycle ??
+        DEFAULT_MEMORY_PROMOTION_MAX_PERCENT_PER_CYCLE,
+      fuzziness: cfg?.memoryPromotion?.fuzziness ?? DEFAULT_MEMORY_PROMOTION_FUZZINESS,
     },
     coreMemory: {
       enabled: cfg?.coreMemory?.enabled ?? DEFAULT_CORE_MEMORY_ENABLED,
       minRecurrence: cfg?.coreMemory?.minRecurrence ?? DEFAULT_CORE_MEMORY_MIN_RECURRENCE,
       minConfidence: cfg?.coreMemory?.minConfidence ?? DEFAULT_CORE_MEMORY_MIN_CONFIDENCE,
+      maxPerCycle: cfg?.coreMemory?.maxPerCycle ?? DEFAULT_CORE_MEMORY_MAX_PER_CYCLE,
     },
     llmReflection: resolveLlmReflectionConfig(cfg?.llmReflection),
   };

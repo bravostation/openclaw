@@ -30,11 +30,15 @@ describe("sleep/phases/shallow", () => {
     const cfg = createMockConfig();
     const sleepCfg = resolveSleepConfig(cfg)!;
 
-    // Override to disable slow/network tasks
+    // Override to disable slow/network/system-dependent tasks
     sleepCfg.shallow.tasks.integrationProbe = false;
-    sleepCfg.shallow.updates.checkOpenClaw = false;
+    sleepCfg.shallow.tasks.apiKeyValidation = false;
+    sleepCfg.shallow.tasks.doctorIntegration = false;
+    sleepCfg.shallow.updates.checkOpenclaw = false;
     sleepCfg.shallow.updates.checkDependencies = false;
     sleepCfg.shallow.updates.checkTools = false;
+    sleepCfg.shallow.updates.checkSystemDependencies = false;
+    sleepCfg.shallow.updates.checkPackageManager = false;
     sleepCfg.shallow.security.npmAudit = false;
     sleepCfg.shallow.security.advisoryCheck = false;
     sleepCfg.shallow.radar.enabled = false;
@@ -61,9 +65,13 @@ describe("sleep/phases/shallow", () => {
     sleepCfg.shallow.tasks.credentialsCheck = false;
     sleepCfg.shallow.tasks.integrationProbe = false;
     sleepCfg.shallow.tasks.memoryIntegrity = false;
-    sleepCfg.shallow.updates.checkOpenClaw = false;
+    sleepCfg.shallow.tasks.apiKeyValidation = false;
+    sleepCfg.shallow.tasks.doctorIntegration = false;
+    sleepCfg.shallow.updates.checkOpenclaw = false;
     sleepCfg.shallow.updates.checkDependencies = false;
     sleepCfg.shallow.updates.checkTools = false;
+    sleepCfg.shallow.updates.checkSystemDependencies = false;
+    sleepCfg.shallow.updates.checkPackageManager = false;
     sleepCfg.shallow.security.npmAudit = false;
     sleepCfg.shallow.security.credentialLeakScan = false;
     sleepCfg.shallow.security.advisoryCheck = false;

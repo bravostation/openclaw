@@ -39,10 +39,12 @@ export type PruneOptions = {
 async function pruneOldSessionFiles(params: {
   sessionsDir: string;
   maxAgeMs: number;
+  gracePeriodMs: number;
+  maxPrunePercent: number;
   signal?: AbortSignal;
   dryRun?: boolean;
 }): Promise<{ pruned: number; bytesFreed: number }> {
-  const { sessionsDir, maxAgeMs, signal, dryRun } = params;
+  const { sessionsDir, maxAgeMs, gracePeriodMs, maxPrunePercent, signal, dryRun } = params;
   const nowMs = Date.now();
   let pruned = 0;
   let bytesFreed = 0;
@@ -50,13 +52,12 @@ async function pruneOldSessionFiles(params: {
   try {
     const entries = await fs.readdir(sessionsDir, { withFileTypes: true });
 
+    // First pass: collect candidates for pruning
+    const candidates: Array<{ name: string; path: string; ageMs: number; size: number }> = [];
+
     for (const entry of entries) {
-      if (signal?.aborted) {
-        break;
-      }
-      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
-        continue;
-      }
+      if (signal?.aborted) break;
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
 
       const filePath = path.join(sessionsDir, entry.name);
 
@@ -64,17 +65,49 @@ async function pruneOldSessionFiles(params: {
         const stat = await fs.stat(filePath);
         const ageMs = nowMs - stat.mtimeMs;
 
+        // Skip files within grace period (never prune recent files)
+        if (ageMs < gracePeriodMs) continue;
+
+        // Only consider files older than maxAge
         if (ageMs > maxAgeMs) {
-          if (!dryRun) {
-            await fs.unlink(filePath);
-          }
-          pruned++;
-          bytesFreed += stat.size;
-          log.debug(`Pruned session file: ${entry.name} (age: ${Math.round(ageMs / 3600000)}h)`);
+          candidates.push({ name: entry.name, path: filePath, ageMs, size: stat.size });
         }
       } catch (err) {
-        log.warn(`Failed to check/prune session file ${entry.name}: ${String(err)}`);
+        log.warn(`Failed to check session file ${entry.name}: ${String(err)}`);
       }
+    }
+
+    // Calculate max files to prune this cycle
+    const totalFiles = entries.filter((e) => e.isFile() && e.name.endsWith(".jsonl")).length;
+    const maxToPrune = Math.max(1, Math.floor((totalFiles * maxPrunePercent) / 100));
+
+    // Sort by age (oldest first) and limit
+    candidates.sort((a, b) => b.ageMs - a.ageMs);
+    const toPrune = candidates.slice(0, maxToPrune);
+
+    // Prune selected files
+    for (const candidate of toPrune) {
+      if (signal?.aborted) break;
+
+      try {
+        if (!dryRun) {
+          await fs.unlink(candidate.path);
+        }
+        pruned++;
+        bytesFreed += candidate.size;
+        log.debug(
+          `Pruned session file: ${candidate.name} (age: ${Math.round(candidate.ageMs / 3600000)}h)`,
+        );
+      } catch (err) {
+        log.warn(`Failed to prune session file ${candidate.name}: ${String(err)}`);
+      }
+    }
+
+    if (candidates.length > toPrune.length) {
+      log.info(
+        `Pruning limited: ${toPrune.length}/${candidates.length} eligible files ` +
+          `(max ${maxPrunePercent}% per cycle)`,
+      );
     }
   } catch (err) {
     log.warn(`Failed to read sessions directory: ${String(err)}`);
@@ -86,6 +119,8 @@ async function pruneOldSessionFiles(params: {
 async function pruneMemoryDatabase(params: {
   dbPath: string;
   maxAgeMs: number;
+  gracePeriodMs: number;
+  maxPrunePercent: number;
   signal?: AbortSignal;
   dryRun?: boolean;
 }): Promise<{
@@ -93,7 +128,7 @@ async function pruneMemoryDatabase(params: {
   chunksAfter: number;
   cacheEntriesPruned: number;
 }> {
-  const { dbPath, maxAgeMs, signal: _signal, dryRun } = params;
+  const { dbPath, maxAgeMs, gracePeriodMs, maxPrunePercent, signal: _signal, dryRun } = params;
 
   try {
     // Check if database exists
@@ -113,15 +148,44 @@ async function pruneMemoryDatabase(params: {
       };
       const chunksBefore = beforeResult?.count ?? 0;
 
-      if (!dryRun) {
-        // Delete old chunks based on updated_at timestamp
-        const cutoffMs = Date.now() - maxAgeMs;
+      if (!dryRun && chunksBefore > 0) {
+        const nowMs = Date.now();
+        const cutoffMs = nowMs - maxAgeMs;
+        const graceCutoffMs = nowMs - gracePeriodMs;
         const cutoffSec = Math.floor(cutoffMs / 1000);
+        const graceCutoffSec = Math.floor(graceCutoffMs / 1000);
 
-        // Delete chunks older than cutoff (updated_at is likely in seconds or ms)
-        db.prepare(`DELETE FROM chunks WHERE updated_at < ?`).run(cutoffSec);
+        // Count how many chunks are eligible for pruning (older than maxAge AND older than grace)
+        const eligibleResult = db
+          .prepare("SELECT COUNT(*) as count FROM chunks WHERE updated_at < ? AND updated_at < ?")
+          .get(cutoffSec, graceCutoffSec) as { count: number };
+        const eligibleCount = eligibleResult?.count ?? 0;
 
-        // Also clean up orphaned vector entries
+        // Calculate max to prune this cycle
+        const maxToPrune = Math.max(1, Math.floor((chunksBefore * maxPrunePercent) / 100));
+        const actualToPrune = Math.min(eligibleCount, maxToPrune);
+
+        if (actualToPrune > 0) {
+          // Delete oldest chunks up to the limit
+          // Use a subquery to select the oldest N chunks to delete
+          db.prepare(
+            `DELETE FROM chunks WHERE rowid IN (
+              SELECT rowid FROM chunks 
+              WHERE updated_at < ? AND updated_at < ?
+              ORDER BY updated_at ASC
+              LIMIT ?
+            )`,
+          ).run(cutoffSec, graceCutoffSec, actualToPrune);
+
+          if (eligibleCount > actualToPrune) {
+            log.info(
+              `Chunk pruning limited: ${actualToPrune}/${eligibleCount} eligible chunks ` +
+                `(max ${maxPrunePercent}% per cycle)`,
+            );
+          }
+        }
+
+        // Clean up orphaned vector entries
         try {
           db.prepare(`DELETE FROM chunks_vec WHERE id NOT IN (SELECT id FROM chunks)`).run();
         } catch {
@@ -188,6 +252,17 @@ async function pruneMemoryDatabase(params: {
 // Main Entry Point
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Apply fuzziness to a threshold value.
+ * Returns value +/- (fuzziness * value) randomly.
+ */
+function applyFuzziness(value: number, fuzziness: number): number {
+  if (fuzziness <= 0) return value;
+  const variance = value * fuzziness;
+  const offset = (Math.random() * 2 - 1) * variance; // -variance to +variance
+  return value + offset;
+}
+
 export async function pruneMemories(options: PruneOptions): Promise<PruneResult> {
   const startMs = Date.now();
   const { agentId, deepCfg, signal, dryRun } = options;
@@ -204,24 +279,40 @@ export async function pruneMemories(options: PruneOptions): Promise<PruneResult>
     };
   }
 
-  const maxAgeMs = deepCfg.memoryPruning.maxAgeHours * 60 * 60 * 1000;
+  const { maxAgeHours, gracePeriodHours, maxPrunePercentPerCycle, fuzziness } =
+    deepCfg.memoryPruning;
+
+  // Apply fuzziness to max age (allow some variance)
+  const effectiveMaxAgeHours = applyFuzziness(maxAgeHours, fuzziness);
+  const maxAgeMs = effectiveMaxAgeHours * 60 * 60 * 1000;
+
+  // Grace period is a hard minimum - memories younger than this are never pruned
+  const gracePeriodMs = gracePeriodHours * 60 * 60 * 1000;
+
   const sessionsDir = resolveSessionsDir(agentId);
   const dbPath = resolveMemoryDbPath(agentId);
 
-  log.info(`Pruning memories for agent ${agentId} (maxAge: ${deepCfg.memoryPruning.maxAgeHours}h)`);
+  log.info(
+    `Pruning memories for agent ${agentId} (maxAge: ${Math.round(effectiveMaxAgeHours)}h, ` +
+      `grace: ${gracePeriodHours}h, maxPrune: ${maxPrunePercentPerCycle}%)`,
+  );
 
-  // Prune session files
+  // Prune session files (respects grace period and max percent)
   const sessionResult = await pruneOldSessionFiles({
     sessionsDir,
     maxAgeMs,
+    gracePeriodMs,
+    maxPrunePercent: maxPrunePercentPerCycle,
     signal,
     dryRun,
   });
 
-  // Prune memory database
+  // Prune memory database (respects grace period and max percent)
   const dbResult = await pruneMemoryDatabase({
     dbPath,
     maxAgeMs,
+    gracePeriodMs,
+    maxPrunePercent: maxPrunePercentPerCycle,
     signal,
     dryRun,
   });

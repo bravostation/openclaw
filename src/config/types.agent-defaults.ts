@@ -270,6 +270,8 @@ export type AgentCompactionMemoryFlushConfig = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type SleepShallowTasksConfig = {
+  /** Enable all shallow sleep tasks. */
+  enabled?: boolean;
   /** Validate config schema and integrity. */
   configValidation?: boolean;
   /** Check for expiring credentials/tokens. */
@@ -278,6 +280,10 @@ export type SleepShallowTasksConfig = {
   integrationProbe?: boolean;
   /** Verify memory store integrity (SQLite checks). */
   memoryIntegrity?: boolean;
+  /** Validate API keys by testing provider endpoints. */
+  apiKeyValidation?: boolean;
+  /** Run doctor checks for state and security. */
+  doctorIntegration?: boolean;
 };
 
 export type SleepUpdatesConfig = {
@@ -289,6 +295,10 @@ export type SleepUpdatesConfig = {
   checkDependencies?: boolean;
   /** Check MCP servers and tools for updates. */
   checkTools?: boolean;
+  /** Check system dependencies (brew, OS, Node, Git). */
+  checkSystemDependencies?: boolean;
+  /** Check package manager for outdated packages. */
+  checkPackageManager?: boolean;
   /** Never auto-update; always advisory only. */
   autoUpdate?: boolean;
 };
@@ -300,6 +310,8 @@ export type SleepSecurityConfig = {
   npmAudit?: boolean;
   /** Scan for leaked credential patterns. */
   credentialScan?: boolean;
+  /** Scan for leaked credential patterns (alias). */
+  credentialLeakScan?: boolean;
   /** Query GitHub Advisory Database for CVEs. */
   advisoryCheck?: boolean;
   /** Check TLS/certificate configurations. */
@@ -339,6 +351,12 @@ export type SleepMemoryPruningConfig = {
   maxAgeHours?: number;
   /** Decay factor for memory relevance (0-1, default: 0.1). */
   decayFactor?: number;
+  /** Grace period in hours - memories younger than this are never pruned (default: 24). */
+  gracePeriodHours?: number;
+  /** Max percentage of memories to prune per cycle (0-100, default: 20). Prevents over-pruning. */
+  maxPrunePercentPerCycle?: number;
+  /** Variance/fuzziness factor for thresholds (0-1, default: 0.1). Adds randomness to avoid cliff effects. */
+  fuzziness?: number;
 };
 
 export type SleepMemoryCompactionConfig = {
@@ -355,6 +373,8 @@ export type SleepCoreMemoryConfig = {
   minRecurrence?: number;
   /** Minimum confidence threshold for core memory creation (0-1, default: 0.7). */
   minConfidence?: number;
+  /** Max core memories to create per cycle (default: 5). */
+  maxPerCycle?: number;
 };
 
 export type SleepMemoryPromotionConfig = {
@@ -364,6 +384,12 @@ export type SleepMemoryPromotionConfig = {
   minReinforcementsForLongTerm?: number;
   /** Minimum confidence threshold for long-term promotion (0-1, default: 0.7). */
   minConfidenceForLongTerm?: number;
+  /** Min age in hours before a memory can be promoted (default: 48). Ensures stability. */
+  minAgeHoursForPromotion?: number;
+  /** Max percentage of candidates to promote per cycle (0-100, default: 30). */
+  maxPromotePercentPerCycle?: number;
+  /** Variance/fuzziness factor for thresholds (0-1, default: 0.1). */
+  fuzziness?: number;
 };
 
 export type SleepLlmReflectionConfig = {
