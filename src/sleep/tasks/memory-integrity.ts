@@ -5,7 +5,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { resolveMemorySearchConfig } from "../../agents/memory-search.js";
 import { STATE_DIR } from "../../config/paths.js";
+import { loadSqliteVecExtension } from "../../memory/sqlite-vec.js";
+import { resolveUserPath } from "../../utils.js";
 import type { ShallowSleepTask, ShallowSleepTaskContext, TaskResult } from "./types.js";
 import { createTaskResult, okItem, warningItem, errorItem, infoItem } from "./types.js";
 
@@ -43,11 +46,15 @@ export const memoryIntegrityTask: ShallowSleepTask = {
         const sizeMb = (stat.size / (1024 * 1024)).toFixed(2);
         items.push(okItem("Memory database exists", `${sizeMb} MB`));
 
+        const memorySearch = resolveMemorySearchConfig(ctx.cfg, agentId);
+        const vectorConfig = memorySearch?.store.vector;
+        const vectorEnabled = vectorConfig?.enabled ?? false;
+
         // Try to perform integrity check using SQLite
         // We use dynamic import to avoid requiring sqlite at module load
         try {
           const { DatabaseSync } = await import("node:sqlite");
-          const db = new DatabaseSync(memoryDbPath, { readOnly: true });
+          const db = new DatabaseSync(memoryDbPath, { readOnly: true, allowExtension: true });
 
           try {
             // Run SQLite integrity check
@@ -65,16 +72,41 @@ export const memoryIntegrityTask: ShallowSleepTask = {
 
             // Get table stats
             const tables = db
-              .prepare("SELECT name FROM sqlite_master WHERE type='table'")
-              .all() as {
-              name: string;
-            }[];
+              .prepare("SELECT name, sql FROM sqlite_master WHERE type='table'")
+              .all() as { name: string; sql: string | null }[];
+            const isVectorTable = (table: { name: string; sql: string | null }) =>
+              table.name === "chunks_vec" || (table.sql ?? "").toLowerCase().includes("using vec0");
+            const hasVectorTable = tables.some(isVectorTable);
+            let vectorReady = true;
+            let vectorLoadError: string | undefined;
+
+            if (hasVectorTable && vectorEnabled) {
+              const resolvedPath = vectorConfig?.extensionPath?.trim()
+                ? resolveUserPath(vectorConfig.extensionPath)
+                : undefined;
+              const loaded = await loadSqliteVecExtension({
+                db,
+                extensionPath: resolvedPath,
+              });
+              vectorReady = loaded.ok;
+              vectorLoadError = loaded.error;
+            } else if (hasVectorTable && !vectorEnabled) {
+              vectorReady = false;
+              vectorLoadError = "Vector search disabled";
+            }
 
             for (const table of tables) {
               if (table.name.startsWith("sqlite_")) {
                 continue;
               }
               try {
+                if (isVectorTable(table) && !vectorReady) {
+                  const reason = vectorLoadError ?? "sqlite-vec unavailable";
+                  const item =
+                    vectorEnabled && reason !== "Vector search disabled" ? warningItem : infoItem;
+                  items.push(item(`Table: ${table.name}`, reason));
+                  continue;
+                }
                 const countResult = db
                   .prepare(`SELECT COUNT(*) as count FROM "${table.name}"`)
                   .get() as { count: number };

@@ -256,7 +256,7 @@ describe("sleep/memory-conversion", () => {
 
       // Should be truncated with ellipsis
       expect(lines[0]).toContain("...");
-      expect(lines[0]!.length).toBeLessThan(200); // Generous but finite
+      expect(lines[0]?.length ?? 0).toBeLessThan(200); // Generous but finite
     });
   });
 

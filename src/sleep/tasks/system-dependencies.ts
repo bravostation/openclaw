@@ -51,7 +51,9 @@ async function runCommand(
 
 function parseVersion(versionStr: string): number[] {
   const match = versionStr.match(/(\d+)\.(\d+)\.?(\d+)?/);
-  if (!match) return [0, 0, 0];
+  if (!match) {
+    return [0, 0, 0];
+  }
   return [
     parseInt(match[1] ?? "0", 10),
     parseInt(match[2] ?? "0", 10),
@@ -63,8 +65,12 @@ function compareVersions(a: string, b: string): number {
   const [aMajor, aMinor, aPatch] = parseVersion(a);
   const [bMajor, bMinor, bPatch] = parseVersion(b);
 
-  if (aMajor !== bMajor) return aMajor - bMajor;
-  if (aMinor !== bMinor) return aMinor - bMinor;
+  if (aMajor !== bMajor) {
+    return aMajor - bMajor;
+  }
+  if (aMinor !== bMinor) {
+    return aMinor - bMinor;
+  }
   return aPatch - bPatch;
 }
 
@@ -78,7 +84,9 @@ async function checkBrewOutdated(signal: AbortSignal): Promise<TaskResult["items
     return items;
   }
 
-  if (signal.aborted) return items;
+  if (signal.aborted) {
+    return items;
+  }
 
   // Get outdated packages
   const outdatedResult = await runCommand("brew outdated --json 2>/dev/null");

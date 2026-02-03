@@ -6,6 +6,7 @@ import type { OpenClawConfig } from "../config/config.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import type { OutboundSendDeps } from "./outbound/deliver.js";
 import {
+  listAgentIds,
   resolveAgentConfig,
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
@@ -42,6 +43,8 @@ import { CommandLane } from "../process/lanes.js";
 import { normalizeAgentId, toAgentStoreSessionKey } from "../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { emitHeartbeatEvent, resolveIndicatorType } from "./heartbeat-events.js";
+import { runSleepCycle } from "../sleep/manager.js";
+import { resolveSleepConfig } from "../sleep/config.js";
 import { resolveHeartbeatVisibility } from "./heartbeat-visibility.js";
 import {
   type HeartbeatRunResult,
@@ -820,6 +823,28 @@ export function startHeartbeatRunner(opts: {
     stopped: false,
   };
   let initialized = false;
+  let lastSleepCheckAtMs = 0;
+
+  const runSleepChecks = async (cfg: OpenClawConfig) => {
+    const sleepCfg = resolveSleepConfig(cfg);
+    if (!sleepCfg) {
+      return;
+    }
+    const agentIds = sleepCfg.agents?.length ? sleepCfg.agents : listAgentIds(cfg);
+    if (agentIds.length === 0) {
+      return;
+    }
+    for (const agentId of agentIds) {
+      if (state.stopped) {
+        return;
+      }
+      try {
+        await runSleepCycle({ cfg, agentId });
+      } catch (err) {
+        log.warn(`sleep check failed for ${agentId}: ${String(err)}`);
+      }
+    }
+  };
 
   const resolveNextDue = (now: number, intervalMs: number, prevState?: HeartbeatAgentState) => {
     if (typeof prevState?.lastRunMs === "number") {
@@ -919,6 +944,11 @@ export function startHeartbeatRunner(opts: {
     const startedAt = Date.now();
     const now = startedAt;
     let ran = false;
+
+    if (isInterval && startedAt - lastSleepCheckAtMs > 5_000) {
+      lastSleepCheckAtMs = startedAt;
+      await runSleepChecks(state.cfg);
+    }
 
     for (const agent of state.agents.values()) {
       if (isInterval && now < agent.nextDueMs) {

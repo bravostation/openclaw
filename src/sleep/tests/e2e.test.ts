@@ -5,7 +5,7 @@
  */
 
 import fs from "node:fs/promises";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
@@ -15,7 +15,7 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { resolveSleepConfig } from "../config.js";
 import { runShallowSleep } from "../phases/shallow.js";
 import { runDeepSleep } from "../phases/deep.js";
-import type { CoreMemoryEntry, LongTermMemoryEntry, MediumTermMemoryEntry } from "../llm/types.js";
+import type { CoreMemoryEntry, LongTermMemoryEntry } from "../llm/types.js";
 import {
   saveCoreMemoriesToWorkspace,
   saveLongTermMemoriesToWorkspace,

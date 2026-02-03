@@ -58,8 +58,12 @@ const PROVIDER_VALIDATIONS: ProviderValidation[] = [
       const tokens = headers.get("x-ratelimit-limit-tokens");
       if (remaining || tokens) {
         const parts = [];
-        if (remaining) parts.push(`${remaining} req/min`);
-        if (tokens) parts.push(`${tokens} tokens/min`);
+        if (remaining) {
+          parts.push(`${remaining} req/min`);
+        }
+        if (tokens) {
+          parts.push(`${tokens} tokens/min`);
+        }
         return parts.join(", ");
       }
       return undefined;
@@ -85,8 +89,12 @@ const PROVIDER_VALIDATIONS: ProviderValidation[] = [
       const tokens = headers.get("x-ratelimit-remaining-tokens");
       if (remaining || tokens) {
         const parts = [];
-        if (remaining) parts.push(`${remaining} req`);
-        if (tokens) parts.push(`${parseInt(tokens, 10).toLocaleString()} tokens`);
+        if (remaining) {
+          parts.push(`${remaining} req`);
+        }
+        if (tokens) {
+          parts.push(`${parseInt(tokens, 10).toLocaleString()} tokens`);
+        }
         return `Remaining: ${parts.join(", ")}`;
       }
       return undefined;
@@ -254,11 +262,37 @@ async function validateApiKey(
     signal.addEventListener("abort", () => controller.abort());
 
     try {
-      const response = await fetch(url, {
-        method: "GET",
+      let method = "GET";
+      let body: string | undefined;
+      if (validation.providerId === "anthropic") {
+        method = "POST";
+        body = JSON.stringify({
+          model: "claude-3-5-sonnet",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "ping" }],
+        });
+      } else if (validation.providerId === "firecrawl") {
+        method = "POST";
+        body = JSON.stringify({ url: "https://example.com", formats: ["markdown"] });
+      } else if (validation.providerId === "perplexity") {
+        method = "POST";
+        const model = apiKey.startsWith("sk-or-") ? "perplexity/sonar-pro" : "sonar-pro";
+        body = JSON.stringify({
+          model,
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+        });
+      }
+
+      const fetchOptions: RequestInit = {
+        method,
         headers: validation.authHeader(apiKey),
         signal: controller.signal,
-      });
+      };
+      if (body) {
+        fetchOptions.body = body;
+      }
+      const response = await fetch(url, fetchOptions);
 
       clearTimeout(timeout);
 
@@ -276,9 +310,11 @@ async function validateApiKey(
         let detail = "Valid";
         if (validation.parseResponse) {
           try {
-            const body = await response.text();
-            const parsed = validation.parseResponse(body);
-            if (parsed) detail = parsed;
+            const responseBody = await response.text();
+            const parsed = validation.parseResponse(responseBody);
+            if (parsed) {
+              detail = parsed;
+            }
           } catch {
             // Ignore parse errors
           }
@@ -333,14 +369,18 @@ async function getApiKeyForProvider(
     const envVars = envVarMap[providerId] ?? [];
     for (const envVar of envVars) {
       const value = process.env[envVar]?.trim();
-      if (value) return value;
+      if (value) {
+        return value;
+      }
     }
 
     // Check config provider
     const providerConfig = cfg?.models?.providers?.[providerId];
     if (providerConfig && typeof providerConfig === "object" && "apiKey" in providerConfig) {
       const key = (providerConfig as { apiKey?: string }).apiKey?.trim();
-      if (key) return key;
+      if (key) {
+        return key;
+      }
     }
 
     // Try to resolve through the standard model auth system
@@ -363,7 +403,9 @@ async function getApiKeyForProvider(
       const resolved = resolveModel(providerId, modelId, undefined, cfg);
       if (resolved.model) {
         const key = await getApiKeyForModel({ model: resolved.model, cfg });
-        if (key && typeof key === "string") return key;
+        if (key && typeof key === "string") {
+          return key;
+        }
       }
     }
 

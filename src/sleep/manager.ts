@@ -2,7 +2,11 @@
  * SleepManager: orchestrates the complete sleep cycle.
  */
 
-import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import {
+  listAgentIds,
+  resolveAgentWorkspaceDir,
+  resolveDefaultAgentId,
+} from "../agents/agent-scope.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { loadConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
@@ -45,6 +49,7 @@ export type SleepCycleResult = {
 export type SleepManagerOptions = {
   cfg?: OpenClawConfig;
   agentId?: string;
+  agentIds?: string[];
   force?: boolean;
   dryRun?: boolean;
   signal?: AbortSignal;
@@ -62,6 +67,16 @@ export type SleepStatus = {
   nextSleepAt: number | null;
   windowInfo: ReturnType<typeof getSleepWindowInfo> | null;
   config: ResolvedSleepConfig | null;
+  agents: string[];
+  byAgent: Record<string, SleepStatusAgent>;
+};
+
+export type SleepStatusAgent = {
+  agentId: string;
+  enabled: boolean;
+  sleeping: boolean;
+  lastSleepAt: number | null;
+  nextSleepAt: number | null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,6 +86,7 @@ export type SleepStatus = {
 let isSleeping = false;
 let lastSleepAtMs: number | null = null;
 let currentAbortController: AbortController | null = null;
+const perAgentState = new Map<string, { lastSleepAtMs: number | null }>();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Sleep Cycle
@@ -188,7 +204,9 @@ export async function runSleepCycle(options: SleepManagerOptions = {}): Promise<
       log.warn(`Failed to save sleep report: ${String(err)}`);
     }
 
-    lastSleepAtMs = Date.now();
+    const completedAt = Date.now();
+    lastSleepAtMs = completedAt;
+    perAgentState.set(agentId, { lastSleepAtMs: completedAt });
 
     return {
       status: report.status,
@@ -274,12 +292,27 @@ export function getSleepStatus(cfg?: OpenClawConfig): SleepStatus {
       nextSleepAt: null,
       windowInfo: null,
       config: null,
+      agents: [],
+      byAgent: {},
     };
   }
 
   const windowInfo = getSleepWindowInfo({ cfg: config, sleepCfg });
   const schedulerDeps = createDefaultSchedulerDeps();
   const eligibility = checkSleepEligibility({ cfg: config, sleepCfg, deps: schedulerDeps });
+  const configuredAgents = sleepCfg.agents ?? [];
+  const resolvedAgents = configuredAgents.length > 0 ? configuredAgents : listAgentIds(config);
+  const byAgent: Record<string, SleepStatusAgent> = {};
+  for (const agentId of resolvedAgents) {
+    const lastAgentSleep = perAgentState.get(agentId)?.lastSleepAtMs ?? null;
+    byAgent[agentId] = {
+      agentId,
+      enabled: true,
+      sleeping: isSleeping,
+      lastSleepAt: lastAgentSleep,
+      nextSleepAt: eligibility.nextWindowAtMs ?? null,
+    };
+  }
 
   return {
     enabled: true,
@@ -288,6 +321,8 @@ export function getSleepStatus(cfg?: OpenClawConfig): SleepStatus {
     nextSleepAt: eligibility.nextWindowAtMs ?? null,
     windowInfo,
     config: sleepCfg,
+    agents: resolvedAgents,
+    byAgent,
   };
 }
 

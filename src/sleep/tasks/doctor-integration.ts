@@ -26,14 +26,7 @@ import {
 } from "../../config/sessions.js";
 
 import type { ShallowSleepTask, ShallowSleepTaskContext, TaskResult } from "./types.js";
-import {
-  createTaskResult,
-  okItem,
-  warningItem,
-  errorItem,
-  infoItem,
-  createSkippedResult,
-} from "./types.js";
+import { createTaskResult, okItem, warningItem, errorItem, createSkippedResult } from "./types.js";
 
 function existsDir(dir: string): boolean {
   try {
@@ -120,8 +113,7 @@ function checkStateIntegrity(cfg: ShallowSleepTaskContext["cfg"]): {
   const entries = Object.entries(store).filter(([, entry]) => entry && typeof entry === "object");
   if (entries.length > 0) {
     const recent = entries
-      .slice()
-      .sort((a, b) => {
+      .toSorted((a, b) => {
         const aUpdated = typeof a[1].updatedAt === "number" ? a[1].updatedAt : 0;
         const bUpdated = typeof b[1].updatedAt === "number" ? b[1].updatedAt : 0;
         return bUpdated - aUpdated;
@@ -129,7 +121,9 @@ function checkStateIntegrity(cfg: ShallowSleepTaskContext["cfg"]): {
       .slice(0, 5);
     const missing = recent.filter(([, entry]) => {
       const sessionId = entry.sessionId;
-      if (!sessionId) return false;
+      if (!sessionId) {
+        return false;
+      }
       const transcriptPath = resolveSessionFilePath(sessionId, entry, { agentId });
       return !existsFile(transcriptPath);
     });

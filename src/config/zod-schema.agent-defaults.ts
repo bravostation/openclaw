@@ -134,6 +134,7 @@ const SleepDeepSchema = z
 export const SleepSchema = z
   .object({
     enabled: z.boolean().optional(),
+    agents: z.array(z.string()).optional(),
     window: z.string().optional(),
     minIdleMinutes: z.number().int().positive().optional(),
     allowInterrupt: z.boolean().optional(),

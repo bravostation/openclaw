@@ -39,6 +39,7 @@ describe("sleep/config", () => {
       const resolved = resolveSleepConfig(cfg);
       expect(resolved).not.toBeNull();
       expect(resolved!.enabled).toBe(true);
+      expect(resolved!.agents).toBeNull();
       expect(resolved!.window).toBe(DEFAULT_SLEEP_WINDOW);
       expect(resolved!.minIdleMinutes).toBe(DEFAULT_MIN_IDLE_MINUTES);
     });
@@ -49,12 +50,14 @@ describe("sleep/config", () => {
           defaults: {
             sleep: {
               enabled: true,
+              agents: ["main", "alpha"],
               window: "02:00-05:30",
             },
           },
         },
       };
       const resolved = resolveSleepConfig(cfg);
+      expect(resolved!.agents).toEqual(["main", "alpha"]);
       expect(resolved!.window).toBe("02:00-05:30");
       expect(resolved!.windowStart).toEqual({ hour: 2, minute: 0 });
       expect(resolved!.windowEnd).toEqual({ hour: 5, minute: 30 });

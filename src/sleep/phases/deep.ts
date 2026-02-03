@@ -8,6 +8,7 @@
  * (SOUL.md, IDENTITY.md) to make smarter pruning/promotion decisions.
  */
 
+import fs from "node:fs/promises";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -23,6 +24,11 @@ import {
   getCoreMemories,
   getLongTermMemories,
   getMediumTermMemories,
+  resolveCoreMemoriesPath,
+  resolveLongTermMemoriesPath,
+  type CoreMemory,
+  type CoreMemoryTheme,
+  type LongTermMemory,
   type PruneResult,
   type CompactResult,
   type PromoteResult,
@@ -42,8 +48,34 @@ import {
   type LongTermMemoryEntry,
   type MemoryCandidate,
 } from "../llm/index.js";
+import { resolveAgentDir } from "../../agents/agent-scope.js";
 
 const log = createSubsystemLogger("sleep/deep");
+const MEDIUM_TERM_CATEGORY_SET = new Set([
+  "fact",
+  "pattern",
+  "preference",
+  "context",
+  "relationship",
+  "event",
+  "other",
+]);
+const CORE_THEME_FROM_LLM: Record<CoreMemoryEntry["theme"], CoreMemoryTheme> = {
+  user_preference: "user_preference",
+  user_values: "user_values",
+  behavioral_pattern: "communication_style",
+  relationship: "relationship",
+  expertise: "domain_expertise",
+  goal: "other",
+  constraint: "risk_tolerance",
+};
+
+function normalizeMediumTermCategory(value?: string): LongTermMemory["category"] {
+  if (value && MEDIUM_TERM_CATEGORY_SET.has(value)) {
+    return value as LongTermMemory["category"];
+  }
+  return "other";
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -263,6 +295,7 @@ export async function runDeepSleep(options: DeepSleepOptions): Promise<DeepSleep
         cfg: options.cfg,
         workspaceDir,
         identityContext,
+        agentId,
         llmConfig,
         signal,
         dryRun,
@@ -332,11 +365,12 @@ async function runLlmReflection(params: {
   cfg: OpenClawConfig;
   workspaceDir: string;
   identityContext: IdentityContext;
+  agentId: string;
   llmConfig: ResolvedLlmReflectionConfig;
   signal?: AbortSignal;
   dryRun?: boolean;
 }): Promise<LlmReflectionResult> {
-  const { cfg, workspaceDir, identityContext, llmConfig, signal, dryRun } = params;
+  const { cfg, workspaceDir, identityContext, agentId, llmConfig, signal, dryRun } = params;
 
   const result: LlmReflectionResult = {
     enabled: true,
@@ -378,6 +412,7 @@ async function runLlmReflection(params: {
       if (toPromote.length > 0 && !dryRun) {
         // Get existing long-term memories
         const existingLongTerm = [...identityContext.longTermMemories];
+        const agentDir = resolveAgentDir(cfg, agentId);
 
         // Add new long-term memories
         const nowMs = Date.now();
@@ -397,8 +432,18 @@ async function runLlmReflection(params: {
           }
         }
 
-        // Save to workspace
         saveLongTermMemoriesToWorkspace(workspaceDir, existingLongTerm);
+        const longTermToPersist: LongTermMemory[] = existingLongTerm.map((m) => ({
+          id: m.id,
+          category: normalizeMediumTermCategory(m.tags?.[0]),
+          summary: m.content,
+          confidence: m.confidence,
+          reinforcementCount: m.accessCount,
+          createdAt: m.createdAt,
+          updatedAt: m.createdAt,
+          originalMediumTermId: undefined,
+        }));
+        await persistLongTermMemories(agentDir, longTermToPersist);
         result.workspaceFilesUpdated.push("MEMORIES-LONG.md");
 
         log.debug(`Promoted ${result.longTermMemoriesPromoted} memories to long-term`);
@@ -430,6 +475,7 @@ async function runLlmReflection(params: {
         const existingCore = [...identityContext.coreMemories];
         const nowMs = Date.now();
 
+        const agentDir = resolveAgentDir(cfg, agentId);
         for (const synthesis of results) {
           // Check if this reinforces an existing core memory
           if (synthesis.reinforcesExisting) {
@@ -458,8 +504,18 @@ async function runLlmReflection(params: {
           }
         }
 
-        // Save to workspace
         saveCoreMemoriesToWorkspace(workspaceDir, existingCore);
+        const coreToPersist: CoreMemory[] = existingCore.map((m) => ({
+          id: m.id,
+          theme: CORE_THEME_FROM_LLM[m.theme] ?? "other",
+          summary: m.description,
+          confidence: m.confidence,
+          supportingMemoryCount: m.supportingMemoryIds.length,
+          createdAt: m.createdAt,
+          updatedAt: m.reinforcedAt ?? m.createdAt,
+          reinforcementCount: m.reinforcementCount ?? 0,
+        }));
+        await persistCoreMemories(agentDir, coreToPersist);
         result.workspaceFilesUpdated.push("MEMORIES-CORE.md");
       }
     } catch (err) {
@@ -468,6 +524,32 @@ async function runLlmReflection(params: {
   }
 
   return result;
+}
+
+async function persistCoreMemories(agentDir: string, memories: CoreMemory[]): Promise<void> {
+  const filePath = resolveCoreMemoriesPath(path.basename(path.dirname(agentDir)));
+  if (filePath.startsWith(agentDir)) {
+    await writeJson(filePath, memories);
+    return;
+  }
+  await writeJson(path.join(agentDir, "core-memories.json"), memories);
+}
+
+async function persistLongTermMemories(
+  agentDir: string,
+  memories: LongTermMemory[],
+): Promise<void> {
+  const filePath = resolveLongTermMemoriesPath(path.basename(path.dirname(agentDir)));
+  if (filePath.startsWith(agentDir)) {
+    await writeJson(filePath, memories);
+    return;
+  }
+  await writeJson(path.join(agentDir, "long-term-memories.json"), memories);
+}
+
+async function writeJson(filePath: string, value: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(value, null, 2), "utf-8");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

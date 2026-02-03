@@ -427,6 +427,8 @@ export type SleepDeepConfig = {
 export type AgentSleepConfig = {
   /** Enable the sleep system (default: false). */
   enabled?: boolean;
+  /** Agent ids to run sleep for (default: all configured agents). */
+  agents?: string[];
   /** Sleep window in local time (HH:MM-HH:MM, default: "03:00-06:00"). */
   window?: string;
   /** Minimum idle minutes before sleep can start (default: 45). */

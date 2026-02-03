@@ -56,8 +56,12 @@ async function pruneOldSessionFiles(params: {
     const candidates: Array<{ name: string; path: string; ageMs: number; size: number }> = [];
 
     for (const entry of entries) {
-      if (signal?.aborted) break;
-      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      if (signal?.aborted) {
+        break;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) {
+        continue;
+      }
 
       const filePath = path.join(sessionsDir, entry.name);
 
@@ -66,7 +70,9 @@ async function pruneOldSessionFiles(params: {
         const ageMs = nowMs - stat.mtimeMs;
 
         // Skip files within grace period (never prune recent files)
-        if (ageMs < gracePeriodMs) continue;
+        if (ageMs < gracePeriodMs) {
+          continue;
+        }
 
         // Only consider files older than maxAge
         if (ageMs > maxAgeMs) {
@@ -87,7 +93,9 @@ async function pruneOldSessionFiles(params: {
 
     // Prune selected files
     for (const candidate of toPrune) {
-      if (signal?.aborted) break;
+      if (signal?.aborted) {
+        break;
+      }
 
       try {
         if (!dryRun) {
@@ -257,7 +265,9 @@ async function pruneMemoryDatabase(params: {
  * Returns value +/- (fuzziness * value) randomly.
  */
 function applyFuzziness(value: number, fuzziness: number): number {
-  if (fuzziness <= 0) return value;
+  if (fuzziness <= 0) {
+    return value;
+  }
   const variance = value * fuzziness;
   const offset = (Math.random() * 2 - 1) * variance; // -variance to +variance
   return value + offset;

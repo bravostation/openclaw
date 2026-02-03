@@ -26,7 +26,8 @@ Enable sleep in your config:
       sleep: {
         enabled: true,
         window: "03:00-06:00",  // Local time window
-        minIdleMinutes: 45      // Wait for inactivity
+        minIdleMinutes: 45,     // Wait for inactivity
+        agents: ["main"]        // Agents to run sleep for (default: all)
       }
     }
   }
@@ -101,6 +102,7 @@ workspace/
         enabled: true,           // Enable sleep system (default: false)
         window: "03:00-06:00",   // Sleep window in local time
         minIdleMinutes: 45,      // Minimum idle time before sleep
+        agents: ["main"],        // Agents to run sleep for (default: all)
         allowInterrupt: true,    // Allow user activity to interrupt
         reportLevel: "summary",  // "summary" or "full"
         timezone: "user"         // "user", "local", or IANA TZ id
@@ -359,7 +361,7 @@ These are promoted directly to long-term or core memory.
 
 Check eligibility:
 ```bash
-openclaw status --deep  # Shows sleep status when implemented
+openclaw status --deep  # Shows sleep status
 ```
 
 Common issues:

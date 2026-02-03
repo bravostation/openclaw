@@ -3,11 +3,10 @@
  */
 
 import fs from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 
 import type { OpenClawConfig } from "../../config/config.js";
 import { resolveSleepConfig } from "../config.js";

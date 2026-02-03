@@ -26,6 +26,27 @@ export const LONG_TERM_MEMORIES_FILENAME = "MEMORIES-LONG.md";
 export const LONG_TERM_MEMORIES_JSON_FILENAME = "memory/memories-long.json";
 export const MEDIUM_TERM_MEMORIES_FILENAME = "memories-medium.json";
 
+const CORE_THEME_MAP: Record<string, CoreMemoryEntry["theme"]> = {
+  user_preference: "user_preference",
+  user_identity: "user_values",
+  user_values: "user_values",
+  communication_style: "behavioral_pattern",
+  risk_tolerance: "constraint",
+  domain_expertise: "expertise",
+  relationship: "relationship",
+  other: "user_preference",
+};
+
+const CORE_THEME_SET = new Set<CoreMemoryEntry["theme"]>([
+  "user_preference",
+  "user_values",
+  "behavioral_pattern",
+  "relationship",
+  "expertise",
+  "goal",
+  "constraint",
+]);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsing Memory Files
 // ─────────────────────────────────────────────────────────────────────────────
@@ -181,9 +202,9 @@ export async function loadIdentityContext(params: {
   const soul = bootstrapFiles.find((f) => f.name === "SOUL.md")?.content;
   const identity = bootstrapFiles.find((f) => f.name === "IDENTITY.md")?.content;
 
-  // Load workspace memory files
-  const coreMemories = loadCoreMemoriesFromWorkspace(params.workspaceDir);
-  const longTermMemories = loadLongTermMemoriesFromWorkspace(params.workspaceDir);
+  // Load memories from agent state (source of truth)
+  const coreMemories = loadCoreMemoriesFromAgent(params.agentDir);
+  const longTermMemories = loadLongTermMemoriesFromAgent(params.agentDir);
   const mediumTermMemories = loadMediumTermMemoriesFromAgent(params.agentDir);
 
   return {
@@ -254,17 +275,171 @@ export function loadLongTermMemoriesFromWorkspace(workspaceDir: string): LongTer
 }
 
 /**
+ * Load core memories from agent state directory.
+ */
+export function loadCoreMemoriesFromAgent(agentDir: string): CoreMemoryEntry[] {
+  const jsonPath = resolveCoreMemoriesPathFromAgentDir(agentDir);
+  if (!existsSync(jsonPath)) {
+    return [];
+  }
+  try {
+    const content = readFileSync(jsonPath, "utf-8");
+    const raw = JSON.parse(content);
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return raw
+      .map((entry): CoreMemoryEntry | null => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const candidate = entry as {
+          id?: string;
+          theme?: string;
+          description?: string;
+          summary?: string;
+          confidence?: number;
+          supportingMemoryIds?: string[];
+          createdAt?: number;
+          updatedAt?: number;
+          reinforcedAt?: number;
+          reinforcementCount?: number;
+        };
+        const description = candidate.description ?? candidate.summary ?? "";
+        if (!candidate.id || !description) {
+          return null;
+        }
+        const rawTheme = typeof candidate.theme === "string" ? candidate.theme : undefined;
+        const mappedTheme =
+          (rawTheme && CORE_THEME_MAP[rawTheme]) ||
+          (rawTheme && CORE_THEME_SET.has(rawTheme as CoreMemoryEntry["theme"])
+            ? (rawTheme as CoreMemoryEntry["theme"])
+            : "user_preference");
+        const createdAt = candidate.createdAt ?? Date.now();
+        const reinforcedAt =
+          candidate.reinforcedAt ??
+          (candidate.updatedAt && candidate.updatedAt > createdAt
+            ? candidate.updatedAt
+            : undefined);
+        const mapped: CoreMemoryEntry = {
+          id: candidate.id,
+          theme: mappedTheme,
+          description,
+          confidence: candidate.confidence ?? 0.5,
+          supportingMemoryIds: candidate.supportingMemoryIds ?? [],
+          createdAt,
+          reinforcedAt,
+          reinforcementCount: candidate.reinforcementCount ?? 0,
+        };
+        return mapped;
+      })
+      .filter((entry): entry is CoreMemoryEntry => entry !== null);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Load long-term memories from agent state directory.
+ */
+export function loadLongTermMemoriesFromAgent(agentDir: string): LongTermMemoryEntry[] {
+  const jsonPath = resolveLongTermMemoriesPathFromAgentDir(agentDir);
+  if (!existsSync(jsonPath)) {
+    return [];
+  }
+  try {
+    const content = readFileSync(jsonPath, "utf-8");
+    const raw = JSON.parse(content);
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return raw
+      .map((entry): LongTermMemoryEntry | null => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const candidate = entry as {
+          id?: string;
+          content?: string;
+          summary?: string;
+          detail?: string;
+          confidence?: number;
+          createdAt?: number;
+          accessCount?: number;
+          reinforcementCount?: number;
+          tags?: string[];
+          category?: string;
+        };
+        const contentValue = candidate.content ?? candidate.summary ?? candidate.detail ?? "";
+        if (!candidate.id || !contentValue) {
+          return null;
+        }
+        const tagCandidate = candidate.tags?.[0] ?? candidate.category;
+        const tags = tagCandidate ? [tagCandidate] : candidate.tags;
+        const mapped: LongTermMemoryEntry = {
+          id: candidate.id,
+          content: contentValue,
+          confidence: candidate.confidence ?? 0.5,
+          createdAt: candidate.createdAt ?? Date.now(),
+          accessCount: candidate.accessCount ?? candidate.reinforcementCount ?? 0,
+          tags,
+        };
+        return mapped;
+      })
+      .filter((entry): entry is LongTermMemoryEntry => entry !== null);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Load medium-term memories from agent state directory.
  */
 export function loadMediumTermMemoriesFromAgent(agentDir: string): MediumTermMemoryEntry[] {
-  const filePath = path.join(agentDir, "memories", MEDIUM_TERM_MEMORIES_FILENAME);
+  const filePath = resolveMediumTermMemoriesPathFromAgentDir(agentDir);
   if (!existsSync(filePath)) {
     return [];
   }
 
   try {
     const content = readFileSync(filePath, "utf-8");
-    return JSON.parse(content) as MediumTermMemoryEntry[];
+    const raw = JSON.parse(content);
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return raw
+      .map((entry): MediumTermMemoryEntry | null => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const candidate = entry as {
+          id?: string;
+          content?: string;
+          summary?: string;
+          detail?: string;
+          confidence?: number;
+          createdAt?: number;
+          accessCount?: number;
+          reinforcementCount?: number;
+          category?: string;
+        };
+        const contentValue = candidate.content ?? candidate.summary ?? "";
+        if (!candidate.id || !contentValue) {
+          return null;
+        }
+        const tag = typeof candidate.category === "string" ? candidate.category : undefined;
+        const mapped: MediumTermMemoryEntry = {
+          id: candidate.id,
+          content: contentValue,
+          confidence: candidate.confidence ?? 0.5,
+          createdAt: candidate.createdAt ?? Date.now(),
+          accessCount: candidate.accessCount ?? candidate.reinforcementCount ?? 0,
+          reinforcementCount: candidate.reinforcementCount ?? 0,
+          tags: tag ? [tag] : undefined,
+        };
+        return mapped;
+      })
+      .filter((entry): entry is MediumTermMemoryEntry => entry !== null);
   } catch {
     return [];
   }
@@ -389,13 +564,24 @@ export function saveMediumTermMemoriesToAgent(
   agentDir: string,
   memories: MediumTermMemoryEntry[],
 ): void {
-  const memoriesDir = path.join(agentDir, "memories");
+  const filePath = resolveMediumTermMemoriesPathFromAgentDir(agentDir);
+  const memoriesDir = path.dirname(filePath);
   if (!existsSync(memoriesDir)) {
     mkdirSync(memoriesDir, { recursive: true });
   }
-
-  const filePath = path.join(memoriesDir, MEDIUM_TERM_MEMORIES_FILENAME);
   writeFileSync(filePath, JSON.stringify(memories, null, 2), "utf-8");
+}
+
+function resolveCoreMemoriesPathFromAgentDir(agentDir: string): string {
+  return path.join(agentDir, "core-memories.json");
+}
+
+function resolveLongTermMemoriesPathFromAgentDir(agentDir: string): string {
+  return path.join(agentDir, "long-term-memories.json");
+}
+
+function resolveMediumTermMemoriesPathFromAgentDir(agentDir: string): string {
+  return path.join(agentDir, "medium-term-memories.json");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

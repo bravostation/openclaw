@@ -78,8 +78,11 @@
     ".": "./dist/index.js",
     "./plugin-sdk": "./dist/plugin-sdk/index.js",
     "./plugin-sdk/*": "./dist/plugin-sdk/*",
+    "./sleep": "./dist/sleep/index.js",
+    "./sleep/*": "./dist/sleep/*",
     "./cli-entry": "./openclaw.mjs"
   },
+
   "scripts": {
     "android:assemble": "cd apps/android && ./gradlew :app:assembleDebug",
     "android:install": "cd apps/android && ./gradlew :app:installDebug",

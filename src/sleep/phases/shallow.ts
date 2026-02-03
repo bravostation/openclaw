@@ -59,7 +59,7 @@ function getEnabledTasks(sleepCfg: ResolvedSleepConfig): ShallowSleepTask[] {
   }
 
   // Health tasks
-  if (shallow.tasks.enabled !== false) {
+  if (shallow.tasks.enabled) {
     if (shallow.tasks.configValidation) {
       tasks.push(configValidationTask);
     }

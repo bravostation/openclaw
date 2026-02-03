@@ -163,6 +163,7 @@ export type ResolvedSleepDeepConfig = {
 
 export type ResolvedSleepConfig = {
   enabled: boolean;
+  agents: string[] | null;
   window: string;
   windowStart: { hour: number; minute: number };
   windowEnd: { hour: number; minute: number };
@@ -318,6 +319,9 @@ export function resolveSleepConfig(cfg?: OpenClawConfig): ResolvedSleepConfig | 
 
   return {
     enabled: true,
+    agents: Array.isArray(sleepCfg.agents)
+      ? sleepCfg.agents.map((agent) => agent.trim()).filter(Boolean)
+      : null,
     window,
     windowStart: parsed.start,
     windowEnd: parsed.end,

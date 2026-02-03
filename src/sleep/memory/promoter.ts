@@ -190,7 +190,9 @@ ${candidate.text.slice(0, 500)}${candidate.text.length > 500 ? "..." : ""}
  * Returns value +/- (fuzziness * value) randomly.
  */
 function applyFuzziness(value: number, fuzziness: number): number {
-  if (fuzziness <= 0) return value;
+  if (fuzziness <= 0) {
+    return value;
+  }
   const variance = value * fuzziness;
   const offset = (Math.random() * 2 - 1) * variance;
   return Math.max(0, Math.min(1, value + offset)); // Clamp to 0-1 for confidence
