@@ -3,9 +3,9 @@
  */
 
 import fs from "node:fs/promises";
-
-import { createSubsystemLogger } from "../../logging/subsystem.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import type { ResolvedSleepDeepConfig } from "../config.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { resolveMemoryDbPath, resolveCoreMemoriesPath } from "./utils.js";
 
 const log = createSubsystemLogger("sleep/memory/core");
@@ -45,6 +45,7 @@ export type CoreMemoryResult = {
 export type CoreMemoryOptions = {
   agentId: string;
   workspaceDir?: string;
+  cfg?: OpenClawConfig;
   deepCfg: ResolvedSleepDeepConfig;
   signal?: AbortSignal;
   dryRun?: boolean;
@@ -54,8 +55,8 @@ export type CoreMemoryOptions = {
 // Core Memory Storage
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function loadCoreMemories(agentId: string): Promise<CoreMemory[]> {
-  const filePath = resolveCoreMemoriesPath(agentId);
+async function loadCoreMemories(agentId: string, cfg?: OpenClawConfig): Promise<CoreMemory[]> {
+  const filePath = resolveCoreMemoriesPath(agentId, cfg);
   try {
     const content = await fs.readFile(filePath, "utf-8");
     return JSON.parse(content) as CoreMemory[];
@@ -64,8 +65,12 @@ async function loadCoreMemories(agentId: string): Promise<CoreMemory[]> {
   }
 }
 
-async function saveCoreMemories(agentId: string, memories: CoreMemory[]): Promise<void> {
-  const filePath = resolveCoreMemoriesPath(agentId);
+async function saveCoreMemories(
+  agentId: string,
+  memories: CoreMemory[],
+  cfg?: OpenClawConfig,
+): Promise<void> {
+  const filePath = resolveCoreMemoriesPath(agentId, cfg);
   await fs.writeFile(filePath, JSON.stringify(memories, null, 2), "utf-8");
 }
 
@@ -194,7 +199,7 @@ async function detectPatterns(params: {
 
 export async function extractCoreMemories(options: CoreMemoryOptions): Promise<CoreMemoryResult> {
   const startMs = Date.now();
-  const { agentId, deepCfg, signal, dryRun } = options;
+  const { agentId, deepCfg, signal, dryRun, cfg } = options;
 
   if (!deepCfg.coreMemory.enabled) {
     return {
@@ -210,7 +215,7 @@ export async function extractCoreMemories(options: CoreMemoryOptions): Promise<C
   log.info(`Extracting core memories for agent ${agentId}`);
 
   // Load existing core memories
-  const existing = await loadCoreMemories(agentId);
+  const existing = await loadCoreMemories(agentId, cfg);
   const existingByKey = new Map(
     existing.map((m) => [`${m.theme}:${m.summary.toLowerCase().slice(0, 50)}`, m]),
   );
@@ -271,7 +276,7 @@ export async function extractCoreMemories(options: CoreMemoryOptions): Promise<C
 
   // Save updated core memories
   if (!dryRun && (newMemoriesCreated > 0 || memoriesReinforced > 0)) {
-    await saveCoreMemories(agentId, existing);
+    await saveCoreMemories(agentId, existing, cfg);
   }
 
   const durationMs = Date.now() - startMs;
@@ -294,6 +299,9 @@ export async function extractCoreMemories(options: CoreMemoryOptions): Promise<C
 /**
  * Get all core memories for an agent.
  */
-export async function getCoreMemories(agentId: string): Promise<CoreMemory[]> {
-  return loadCoreMemories(agentId);
+export async function getCoreMemories(
+  agentId: string,
+  cfg?: OpenClawConfig,
+): Promise<CoreMemory[]> {
+  return loadCoreMemories(agentId, cfg);
 }

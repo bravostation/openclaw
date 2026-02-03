@@ -2,23 +2,15 @@
  * SleepManager: orchestrates the complete sleep cycle.
  */
 
+import type { OpenClawConfig } from "../config/config.js";
 import {
   listAgentIds,
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
 } from "../agents/agent-scope.js";
-import type { OpenClawConfig } from "../config/config.js";
 import { loadConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveSleepConfig, type ResolvedSleepConfig } from "./config.js";
-import {
-  checkSleepEligibility,
-  createDefaultSchedulerDeps,
-  getSleepWindowInfo,
-  recordUserActivity,
-  setUserActive,
-  type SleepSchedulerDeps,
-} from "./scheduler.js";
 import {
   runShallowSleep,
   runDeepSleep,
@@ -32,6 +24,14 @@ import {
   formatReportMarkdown,
   type SleepReport,
 } from "./reports/index.js";
+import {
+  checkSleepEligibility,
+  createDefaultSchedulerDeps,
+  getSleepWindowInfo,
+  recordUserActivity,
+  setUserActive,
+  type SleepSchedulerDeps,
+} from "./scheduler.js";
 
 const log = createSubsystemLogger("sleep/manager");
 
@@ -83,9 +83,9 @@ export type SleepStatusAgent = {
 // State
 // ─────────────────────────────────────────────────────────────────────────────
 
-let isSleeping = false;
+const activeSleepCycles = new Set<string>();
 let lastSleepAtMs: number | null = null;
-let currentAbortController: AbortController | null = null;
+const abortControllers = new Map<string, AbortController>();
 const perAgentState = new Map<string, { lastSleepAtMs: number | null }>();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,21 +117,22 @@ export async function runSleepCycle(options: SleepManagerOptions = {}): Promise<
     }
   }
 
-  // Prevent concurrent sleep cycles
-  if (isSleeping) {
-    log.warn("Sleep cycle already in progress");
+  // Prevent concurrent sleep cycles for the same agent
+  if (activeSleepCycles.has(agentId)) {
+    log.warn(`Sleep cycle already in progress for agent ${agentId}`);
     return { status: "skipped", reason: "Already sleeping", report: null };
   }
 
   // Setup
-  isSleeping = true;
-  currentAbortController = new AbortController();
+  activeSleepCycles.add(agentId);
+  const controller = new AbortController();
+  abortControllers.set(agentId, controller);
   const startedAt = Date.now();
 
   // Link external signal
   if (options.signal) {
     options.signal.addEventListener("abort", () => {
-      currentAbortController?.abort();
+      controller.abort();
     });
   }
 
@@ -153,7 +154,7 @@ export async function runSleepCycle(options: SleepManagerOptions = {}): Promise<
         sleepCfg,
         workspaceDir,
         agentId,
-        signal: currentAbortController.signal,
+        signal: controller.signal,
       });
 
       options.onShallowComplete?.(shallowResult);
@@ -167,7 +168,7 @@ export async function runSleepCycle(options: SleepManagerOptions = {}): Promise<
     // Phase 2: Deep Sleep (if shallow passed)
     const canRunDeep =
       sleepCfg.deep.enabled &&
-      !currentAbortController.signal.aborted &&
+      !controller.signal.aborted &&
       (!shallowResult || !shallowResult.hasCriticalFailure);
 
     if (canRunDeep) {
@@ -179,7 +180,7 @@ export async function runSleepCycle(options: SleepManagerOptions = {}): Promise<
         sleepCfg,
         workspaceDir,
         agentId,
-        signal: currentAbortController.signal,
+        signal: controller.signal,
         dryRun: options.dryRun,
       });
 
@@ -223,8 +224,8 @@ export async function runSleepCycle(options: SleepManagerOptions = {}): Promise<
       report: null,
     };
   } finally {
-    isSleeping = false;
-    currentAbortController = null;
+    activeSleepCycles.delete(agentId);
+    abortControllers.delete(agentId);
   }
 }
 
@@ -235,13 +236,26 @@ export async function runSleepCycle(options: SleepManagerOptions = {}): Promise<
 /**
  * Wake from sleep (interrupt current sleep cycle).
  */
-export function wake(): boolean {
-  if (!isSleeping) {
+export function wake(agentId?: string): boolean {
+  if (agentId) {
+    const controller = abortControllers.get(agentId);
+    if (controller) {
+      log.info(`Waking agent ${agentId} from sleep`);
+      controller.abort();
+      return true;
+    }
     return false;
   }
 
-  log.info("Waking from sleep");
-  currentAbortController?.abort();
+  // Wake all agents
+  if (activeSleepCycles.size === 0) {
+    return false;
+  }
+
+  log.info("Waking all agents from sleep");
+  for (const controller of abortControllers.values()) {
+    controller.abort();
+  }
   return true;
 }
 
@@ -255,7 +269,7 @@ export function notifyUserActivity(): void {
   const cfg = loadConfig();
   const sleepCfg = resolveSleepConfig(cfg);
 
-  if (isSleeping && sleepCfg?.allowInterrupt) {
+  if (activeSleepCycles.size > 0 && sleepCfg?.allowInterrupt) {
     wake();
   }
 }
@@ -266,7 +280,7 @@ export function notifyUserActivity(): void {
 export function setUserActiveState(active: boolean): void {
   setUserActive(active);
 
-  if (active && isSleeping) {
+  if (active && activeSleepCycles.size > 0) {
     const cfg = loadConfig();
     const sleepCfg = resolveSleepConfig(cfg);
 
@@ -284,10 +298,12 @@ export function getSleepStatus(cfg?: OpenClawConfig): SleepStatus {
   const config = cfg ?? loadConfig();
   const sleepCfg = resolveSleepConfig(config);
 
+  const anySleeping = activeSleepCycles.size > 0;
+
   if (!sleepCfg) {
     return {
       enabled: false,
-      sleeping: isSleeping,
+      sleeping: anySleeping,
       lastSleepAt: lastSleepAtMs,
       nextSleepAt: null,
       windowInfo: null,
@@ -308,7 +324,7 @@ export function getSleepStatus(cfg?: OpenClawConfig): SleepStatus {
     byAgent[agentId] = {
       agentId,
       enabled: true,
-      sleeping: isSleeping,
+      sleeping: activeSleepCycles.has(agentId),
       lastSleepAt: lastAgentSleep,
       nextSleepAt: eligibility.nextWindowAtMs ?? null,
     };
@@ -316,7 +332,7 @@ export function getSleepStatus(cfg?: OpenClawConfig): SleepStatus {
 
   return {
     enabled: true,
-    sleeping: isSleeping,
+    sleeping: anySleeping,
     lastSleepAt: lastSleepAtMs,
     nextSleepAt: eligibility.nextWindowAtMs ?? null,
     windowInfo,
@@ -341,7 +357,7 @@ export function formatSleepReport(report: SleepReport, level?: "summary" | "full
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function _resetState(): void {
-  isSleeping = false;
+  activeSleepCycles.clear();
+  abortControllers.clear();
   lastSleepAtMs = null;
-  currentAbortController = null;
 }

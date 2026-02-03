@@ -8,13 +8,25 @@
  * (SOUL.md, IDENTITY.md) to make smarter pruning/promotion decisions.
  */
 
-import fs from "node:fs/promises";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
-
 import type { OpenClawConfig } from "../../config/config.js";
-import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { ResolvedSleepConfig } from "../config.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
+import {
+  prepareReflectionContext,
+  reflectOnPromotion,
+  synthesizeCoreMemories,
+  saveCoreMemoriesToWorkspace,
+  saveLongTermMemoriesToWorkspace,
+  type IdentityContext,
+  type ResolvedLlmReflectionConfig,
+  type ReflectionLogEntry,
+  type CoreMemoryEntry,
+  type LongTermMemoryEntry,
+  type MemoryCandidate,
+} from "../llm/index.js";
 import {
   pruneMemories,
   compactMemories,
@@ -35,20 +47,6 @@ import {
   type CoreMemoryResult,
   type MediumTermResult,
 } from "../memory/index.js";
-import {
-  prepareReflectionContext,
-  reflectOnPromotion,
-  synthesizeCoreMemories,
-  saveCoreMemoriesToWorkspace,
-  saveLongTermMemoriesToWorkspace,
-  type IdentityContext,
-  type ResolvedLlmReflectionConfig,
-  type ReflectionLogEntry,
-  type CoreMemoryEntry,
-  type LongTermMemoryEntry,
-  type MemoryCandidate,
-} from "../llm/index.js";
-import { resolveAgentDir } from "../../agents/agent-scope.js";
 
 const log = createSubsystemLogger("sleep/deep");
 const MEDIUM_TERM_CATEGORY_SET = new Set([
@@ -231,6 +229,7 @@ export async function runDeepSleep(options: DeepSleepOptions): Promise<DeepSleep
         deepCfg: sleepCfg.deep,
         signal,
         dryRun,
+        cfg: options.cfg,
       });
 
       options.onPhaseComplete?.("mediumTerm", mediumTermResult);
@@ -280,6 +279,7 @@ export async function runDeepSleep(options: DeepSleepOptions): Promise<DeepSleep
         deepCfg: sleepCfg.deep,
         signal,
         dryRun,
+        cfg: options.cfg,
       });
 
       options.onPhaseComplete?.("coreMemory", coreMemoryResult);
@@ -412,7 +412,6 @@ async function runLlmReflection(params: {
       if (toPromote.length > 0 && !dryRun) {
         // Get existing long-term memories
         const existingLongTerm = [...identityContext.longTermMemories];
-        const agentDir = resolveAgentDir(cfg, agentId);
 
         // Add new long-term memories
         const nowMs = Date.now();
@@ -432,7 +431,13 @@ async function runLlmReflection(params: {
           }
         }
 
-        saveLongTermMemoriesToWorkspace(workspaceDir, existingLongTerm);
+        try {
+          saveLongTermMemoriesToWorkspace(workspaceDir, existingLongTerm);
+          result.workspaceFilesUpdated.push("MEMORIES-LONG.md");
+        } catch (err) {
+          log.warn(`Failed to save long-term memories to workspace: ${String(err)}`);
+        }
+
         const longTermToPersist: LongTermMemory[] = existingLongTerm.map((m) => ({
           id: m.id,
           category: normalizeMediumTermCategory(m.tags?.[0]),
@@ -443,8 +448,12 @@ async function runLlmReflection(params: {
           updatedAt: m.createdAt,
           originalMediumTermId: undefined,
         }));
-        await persistLongTermMemories(agentDir, longTermToPersist);
-        result.workspaceFilesUpdated.push("MEMORIES-LONG.md");
+
+        try {
+          await persistLongTermMemories(agentId, longTermToPersist, cfg);
+        } catch (err) {
+          log.warn(`Failed to persist long-term memories: ${String(err)}`);
+        }
 
         log.debug(`Promoted ${result.longTermMemoriesPromoted} memories to long-term`);
       }
@@ -475,7 +484,6 @@ async function runLlmReflection(params: {
         const existingCore = [...identityContext.coreMemories];
         const nowMs = Date.now();
 
-        const agentDir = resolveAgentDir(cfg, agentId);
         for (const synthesis of results) {
           // Check if this reinforces an existing core memory
           if (synthesis.reinforcesExisting) {
@@ -504,7 +512,13 @@ async function runLlmReflection(params: {
           }
         }
 
-        saveCoreMemoriesToWorkspace(workspaceDir, existingCore);
+        try {
+          saveCoreMemoriesToWorkspace(workspaceDir, existingCore);
+          result.workspaceFilesUpdated.push("MEMORIES-CORE.md");
+        } catch (err) {
+          log.warn(`Failed to save core memories to workspace: ${String(err)}`);
+        }
+
         const coreToPersist: CoreMemory[] = existingCore.map((m) => ({
           id: m.id,
           theme: CORE_THEME_FROM_LLM[m.theme] ?? "other",
@@ -515,8 +529,12 @@ async function runLlmReflection(params: {
           updatedAt: m.reinforcedAt ?? m.createdAt,
           reinforcementCount: m.reinforcementCount ?? 0,
         }));
-        await persistCoreMemories(agentDir, coreToPersist);
-        result.workspaceFilesUpdated.push("MEMORIES-CORE.md");
+
+        try {
+          await persistCoreMemories(agentId, coreToPersist, cfg);
+        } catch (err) {
+          log.warn(`Failed to persist core memories: ${String(err)}`);
+        }
       }
     } catch (err) {
       log.warn(`LLM core synthesis failed: ${String(err)}`);
@@ -526,25 +544,22 @@ async function runLlmReflection(params: {
   return result;
 }
 
-async function persistCoreMemories(agentDir: string, memories: CoreMemory[]): Promise<void> {
-  const filePath = resolveCoreMemoriesPath(path.basename(path.dirname(agentDir)));
-  if (filePath.startsWith(agentDir)) {
-    await writeJson(filePath, memories);
-    return;
-  }
-  await writeJson(path.join(agentDir, "core-memories.json"), memories);
+async function persistCoreMemories(
+  agentId: string,
+  memories: CoreMemory[],
+  cfg: OpenClawConfig,
+): Promise<void> {
+  const filePath = resolveCoreMemoriesPath(agentId, cfg);
+  await writeJson(filePath, memories);
 }
 
 async function persistLongTermMemories(
-  agentDir: string,
+  agentId: string,
   memories: LongTermMemory[],
+  cfg: OpenClawConfig,
 ): Promise<void> {
-  const filePath = resolveLongTermMemoriesPath(path.basename(path.dirname(agentDir)));
-  if (filePath.startsWith(agentDir)) {
-    await writeJson(filePath, memories);
-    return;
-  }
-  await writeJson(path.join(agentDir, "long-term-memories.json"), memories);
+  const filePath = resolveLongTermMemoriesPath(agentId, cfg);
+  await writeJson(filePath, memories);
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {

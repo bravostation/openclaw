@@ -12,9 +12,9 @@
  */
 
 import fs from "node:fs/promises";
-
-import { createSubsystemLogger } from "../../logging/subsystem.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import type { ResolvedSleepDeepConfig } from "../config.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   resolveMediumTermMemoriesPath,
   resolveLongTermMemoriesPath,
@@ -78,6 +78,7 @@ export type MediumTermResult = {
 export type MediumTermOptions = {
   agentId: string;
   deepCfg: ResolvedSleepDeepConfig;
+  cfg?: OpenClawConfig;
   signal?: AbortSignal;
   dryRun?: boolean;
 };
@@ -86,8 +87,11 @@ export type MediumTermOptions = {
 // Storage
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function loadMediumTermMemories(agentId: string): Promise<MediumTermMemory[]> {
-  const filePath = resolveMediumTermMemoriesPath(agentId);
+async function loadMediumTermMemories(
+  agentId: string,
+  cfg?: OpenClawConfig,
+): Promise<MediumTermMemory[]> {
+  const filePath = resolveMediumTermMemoriesPath(agentId, cfg);
   try {
     const content = await fs.readFile(filePath, "utf-8");
     return JSON.parse(content) as MediumTermMemory[];
@@ -99,15 +103,19 @@ async function loadMediumTermMemories(agentId: string): Promise<MediumTermMemory
 async function saveMediumTermMemories(
   agentId: string,
   memories: MediumTermMemory[],
+  cfg?: OpenClawConfig,
 ): Promise<void> {
-  const filePath = resolveMediumTermMemoriesPath(agentId);
+  const filePath = resolveMediumTermMemoriesPath(agentId, cfg);
   const dir = filePath.substring(0, filePath.lastIndexOf("/"));
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(memories, null, 2), "utf-8");
 }
 
-async function loadLongTermMemories(agentId: string): Promise<LongTermMemory[]> {
-  const filePath = resolveLongTermMemoriesPath(agentId);
+async function loadLongTermMemories(
+  agentId: string,
+  cfg?: OpenClawConfig,
+): Promise<LongTermMemory[]> {
+  const filePath = resolveLongTermMemoriesPath(agentId, cfg);
   try {
     const content = await fs.readFile(filePath, "utf-8");
     return JSON.parse(content) as LongTermMemory[];
@@ -116,8 +124,12 @@ async function loadLongTermMemories(agentId: string): Promise<LongTermMemory[]> 
   }
 }
 
-async function saveLongTermMemories(agentId: string, memories: LongTermMemory[]): Promise<void> {
-  const filePath = resolveLongTermMemoriesPath(agentId);
+async function saveLongTermMemories(
+  agentId: string,
+  memories: LongTermMemory[],
+  cfg?: OpenClawConfig,
+): Promise<void> {
+  const filePath = resolveLongTermMemoriesPath(agentId, cfg);
   const dir = filePath.substring(0, filePath.lastIndexOf("/"));
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(memories, null, 2), "utf-8");
@@ -277,7 +289,7 @@ export async function processMediumTermMemories(
   options: MediumTermOptions,
 ): Promise<MediumTermResult> {
   const startMs = Date.now();
-  const { agentId, deepCfg, signal, dryRun } = options;
+  const { agentId, deepCfg, signal, dryRun, cfg } = options;
 
   // Get config values with defaults
   const minReinforcements = deepCfg.memoryPromotion?.minReinforcementsForLongTerm ?? 3;
@@ -286,8 +298,8 @@ export async function processMediumTermMemories(
   const dbPath = resolveMemoryDbPath(agentId);
 
   // Load existing memories
-  const mediumTerm = await loadMediumTermMemories(agentId);
-  const longTerm = await loadLongTermMemories(agentId);
+  const mediumTerm = await loadMediumTermMemories(agentId, cfg);
+  const longTerm = await loadLongTermMemories(agentId, cfg);
   const memoriesBefore = mediumTerm.length;
 
   log.info(`Processing medium-term memories for agent ${agentId}`);
@@ -388,9 +400,9 @@ export async function processMediumTermMemories(
 
   // Save updated memories
   if (!dryRun) {
-    await saveMediumTermMemories(agentId, mediumTerm);
+    await saveMediumTermMemories(agentId, mediumTerm, cfg);
     if (promotedToLongTerm > 0) {
-      await saveLongTermMemories(agentId, longTerm);
+      await saveLongTermMemories(agentId, longTerm, cfg);
     }
   }
 
@@ -414,15 +426,21 @@ export async function processMediumTermMemories(
 /**
  * Get all medium-term memories for an agent.
  */
-export async function getMediumTermMemories(agentId: string): Promise<MediumTermMemory[]> {
-  return loadMediumTermMemories(agentId);
+export async function getMediumTermMemories(
+  agentId: string,
+  cfg?: OpenClawConfig,
+): Promise<MediumTermMemory[]> {
+  return loadMediumTermMemories(agentId, cfg);
 }
 
 /**
  * Get all long-term memories for an agent.
  */
-export async function getLongTermMemories(agentId: string): Promise<LongTermMemory[]> {
-  return loadLongTermMemories(agentId);
+export async function getLongTermMemories(
+  agentId: string,
+  cfg?: OpenClawConfig,
+): Promise<LongTermMemory[]> {
+  return loadLongTermMemories(agentId, cfg);
 }
 
 /**
@@ -432,8 +450,9 @@ export async function searchMediumTermMemories(
   agentId: string,
   query: string,
   limit = 5,
+  cfg?: OpenClawConfig,
 ): Promise<MediumTermMemory[]> {
-  const memories = await loadMediumTermMemories(agentId);
+  const memories = await loadMediumTermMemories(agentId, cfg);
   const queryLower = query.toLowerCase();
 
   // Simple keyword matching (could be enhanced with embeddings)

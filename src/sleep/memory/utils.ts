@@ -3,14 +3,18 @@
  */
 
 import path from "node:path";
-
+import type { OpenClawConfig } from "../../config/config.js";
+import { resolveAgentDir } from "../../agents/agent-scope.js";
 import { STATE_DIR } from "../../config/paths.js";
 
 /**
  * Resolve agent directory path (simplified version for sleep system).
  * Uses default STATE_DIR-based path structure.
  */
-export function resolveAgentDirForSleep(agentId: string): string {
+export function resolveAgentDirForSleep(agentId: string, cfg?: OpenClawConfig): string {
+  if (cfg) {
+    return resolveAgentDir(cfg, agentId);
+  }
   const id = agentId.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
   return path.join(STATE_DIR, "agents", id, "agent");
 }
@@ -26,27 +30,27 @@ export function resolveMemoryDbPath(agentId: string): string {
 /**
  * Resolve sessions directory for an agent.
  */
-export function resolveSessionsDir(agentId: string): string {
-  return path.join(resolveAgentDirForSleep(agentId), "sessions");
+export function resolveSessionsDir(agentId: string, cfg?: OpenClawConfig): string {
+  return path.join(resolveAgentDirForSleep(agentId, cfg), "sessions");
 }
 
 /**
  * Resolve core memories file path for an agent.
  */
-export function resolveCoreMemoriesPath(agentId: string): string {
-  return path.join(resolveAgentDirForSleep(agentId), "core-memories.json");
+export function resolveCoreMemoriesPath(agentId: string, cfg?: OpenClawConfig): string {
+  return path.join(resolveAgentDirForSleep(agentId, cfg), "core-memories.json");
 }
 
 /**
  * Resolve long-term memories file path for an agent.
  */
-export function resolveLongTermMemoriesPath(agentId: string): string {
-  return path.join(resolveAgentDirForSleep(agentId), "long-term-memories.json");
+export function resolveLongTermMemoriesPath(agentId: string, cfg?: OpenClawConfig): string {
+  return path.join(resolveAgentDirForSleep(agentId, cfg), "long-term-memories.json");
 }
 
 /**
  * Resolve medium-term memories file path for an agent.
  */
-export function resolveMediumTermMemoriesPath(agentId: string): string {
-  return path.join(resolveAgentDirForSleep(agentId), "medium-term-memories.json");
+export function resolveMediumTermMemoriesPath(agentId: string, cfg?: OpenClawConfig): string {
+  return path.join(resolveAgentDirForSleep(agentId, cfg), "medium-term-memories.json");
 }
