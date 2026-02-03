@@ -9,6 +9,7 @@ import {
   resolveDefaultAgentId,
 } from "../agents/agent-scope.js";
 import { loadConfig } from "../config/config.js";
+import { sendMessage } from "../infra/outbound/message.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveSleepConfig, type ResolvedSleepConfig } from "./config.js";
 import {
@@ -205,6 +206,11 @@ export async function runSleepCycle(options: SleepManagerOptions = {}): Promise<
       log.warn(`Failed to save sleep report: ${String(err)}`);
     }
 
+    // Send notification if configured
+    if (sleepCfg.notify !== "none") {
+      await sendSleepNotification(report, sleepCfg, cfg);
+    }
+
     const completedAt = Date.now();
     lastSleepAtMs = completedAt;
     perAgentState.set(agentId, { lastSleepAtMs: completedAt });
@@ -350,6 +356,76 @@ export function formatSleepReport(report: SleepReport, level?: "summary" | "full
   const cfg = loadConfig();
   const sleepCfg = resolveSleepConfig(cfg);
   return formatReportMarkdown(report, level ?? sleepCfg?.reportLevel ?? "summary");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notification
+// ─────────────────────────────────────────────────────────────────────────────
+
+function formatNotificationSummary(report: SleepReport): string {
+  const statusEmoji =
+    report.status === "completed" ? "✅" : report.status === "aborted" ? "⚠️" : "❌";
+  const date = new Date(report.startedAt).toISOString().split("T")[0];
+
+  const lines: string[] = [];
+  lines.push(`${statusEmoji} Sleep cycle ${report.status} – ${date}`);
+  lines.push("");
+
+  if (report.shallow) {
+    const s = report.shallow.summary;
+    const shallowStatus = s.failed > 0 || s.criticalIssues > 0 ? "⚠️" : s.warnings > 0 ? "🔶" : "✓";
+    lines.push(
+      `${shallowStatus} Shallow: ${s.passed}/${s.passed + s.failed} tasks, ${s.warnings} warnings`,
+    );
+  }
+
+  if (report.deep) {
+    const s = report.deep.summary;
+    const memoryCount = s.memoriesBefore;
+    const processed = s.memoriesPruned + s.memoriesCompacted + s.mediumTermReinforced;
+    lines.push(`✓ Deep: ${memoryCount} memories, ${processed} processed`);
+    if (s.llmReflectionEnabled && (s.llmCoreMemoriesCreated > 0 || s.llmLongTermPromoted > 0)) {
+      lines.push(`  └ LLM: ${s.llmCoreMemoriesCreated} core, ${s.llmLongTermPromoted} long-term`);
+    }
+  }
+
+  const durationSec = Math.round(report.totalDurationMs / 1000);
+  lines.push("");
+  lines.push(`Duration: ${durationSec}s`);
+
+  return lines.join("\n");
+}
+
+async function sendSleepNotification(
+  report: SleepReport,
+  sleepCfg: ResolvedSleepConfig,
+  cfg: OpenClawConfig,
+): Promise<void> {
+  if (sleepCfg.notify === "none") {
+    return;
+  }
+
+  const summary = formatNotificationSummary(report);
+  const channel = sleepCfg.notify === "default" ? undefined : sleepCfg.notify;
+  const to = sleepCfg.notifyTo ?? "";
+
+  if (!to && !channel) {
+    log.debug("Sleep notification skipped: no recipient or channel configured");
+    return;
+  }
+
+  try {
+    await sendMessage({
+      to,
+      content: summary,
+      channel,
+      cfg,
+      bestEffort: true,
+    });
+    log.debug(`Sleep notification sent via ${channel ?? "default channel"}`);
+  } catch (err) {
+    log.warn(`Failed to send sleep notification: ${String(err)}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

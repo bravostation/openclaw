@@ -173,6 +173,8 @@ export type ResolvedSleepConfig = {
   timezone: string;
   shallow: ResolvedSleepShallowConfig;
   deep: ResolvedSleepDeepConfig;
+  notify: "none" | "default" | string;
+  notifyTo: string | null;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -317,6 +319,14 @@ export function resolveSleepConfig(cfg?: OpenClawConfig): ResolvedSleepConfig | 
     return null;
   }
 
+  // Resolve notify option
+  let notify: "none" | "default" | string = "none";
+  if (sleepCfg.notify === true || sleepCfg.notify === "default") {
+    notify = "default";
+  } else if (typeof sleepCfg.notify === "string" && sleepCfg.notify !== "none") {
+    notify = sleepCfg.notify;
+  }
+
   return {
     enabled: true,
     agents: Array.isArray(sleepCfg.agents)
@@ -331,6 +341,8 @@ export function resolveSleepConfig(cfg?: OpenClawConfig): ResolvedSleepConfig | 
     timezone: sleepCfg.timezone ?? "user",
     shallow: resolveShallowConfig(sleepCfg.shallow),
     deep: resolveDeepConfig(sleepCfg.deep),
+    notify,
+    notifyTo: sleepCfg.notifyTo ?? null,
   };
 }
 

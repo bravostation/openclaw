@@ -443,4 +443,13 @@ export type AgentSleepConfig = {
   shallow?: SleepShallowConfig;
   /** Deep sleep phase configuration. */
   deep?: SleepDeepConfig;
+  /**
+   * Send a notification when sleep completes.
+   * - false / "none": no notification (default)
+   * - true / "default": notify on the default/last-used channel
+   * - channel id: notify on a specific channel (e.g., "telegram", "imessage")
+   */
+  notify?: boolean | "none" | "default" | ChannelId;
+  /** Recipient for sleep notifications (E.164 for WhatsApp, chat id for Telegram, etc.). */
+  notifyTo?: string;
 };
