@@ -142,6 +142,8 @@ export const SleepSchema = z
     timezone: z.string().optional(),
     shallow: SleepShallowSchema,
     deep: SleepDeepSchema,
+    notify: z.union([z.boolean(), z.literal("none"), z.literal("default"), z.string()]).optional(),
+    notifyTo: z.string().optional(),
   })
   .strict()
   .optional();
