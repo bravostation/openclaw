@@ -1,21 +1,28 @@
+import type { RuntimeEnv } from "../runtime.js";
+import { formatCliCommand } from "../cli/command-format.js";
 import { withProgress } from "../cli/progress.js";
 import { resolveGatewayPort } from "../config/config.js";
 import { buildGatewayConnectionDetails, callGateway } from "../gateway/call.js";
 import { info } from "../globals.js";
 import { formatUsageReportLines, loadProviderUsageSummary } from "../infra/provider-usage.js";
-import type { RuntimeEnv } from "../runtime.js";
-import { runSecurityAudit } from "../security/audit.js";
-import { renderTable } from "../terminal/table.js";
-import { theme } from "../terminal/theme.js";
-import { formatCliCommand } from "../cli/command-format.js";
+import {
+  formatUpdateChannelLabel,
+  normalizeUpdateChannel,
+  resolveEffectiveUpdateChannel,
+} from "../infra/update-channels.js";
 import {
   resolveMemoryCacheSummary,
   resolveMemoryFtsState,
   resolveMemoryVectorState,
   type Tone,
 } from "../memory/status-format.js";
+import { runSecurityAudit } from "../security/audit.js";
+import { renderTable } from "../terminal/table.js";
+import { theme } from "../terminal/theme.js";
 import { formatHealthChannelLines, type HealthSummary } from "./health.js";
 import { resolveControlUiLinks } from "./onboard-helpers.js";
+import { statusAllCommand } from "./status-all.js";
+import { formatGatewayAuthUsed } from "./status-all/format.js";
 import { getDaemonStatusSummary, getNodeDaemonStatusSummary } from "./status.daemon.js";
 import {
   formatAge,
@@ -31,13 +38,6 @@ import {
   formatUpdateOneLiner,
   resolveUpdateAvailability,
 } from "./status.update.js";
-import { formatGatewayAuthUsed } from "./status-all/format.js";
-import { statusAllCommand } from "./status-all.js";
-import {
-  formatUpdateChannelLabel,
-  normalizeUpdateChannel,
-  resolveEffectiveUpdateChannel,
-} from "../infra/update-channels.js";
 
 export async function statusCommand(
   opts: {
@@ -276,6 +276,25 @@ export async function statusCommand(
     return parts.length > 0 ? parts.join(", ") : "disabled";
   })();
 
+  const sleepValue = (() => {
+    if (!summary.sleep?.enabled) {
+      return muted("disabled");
+    }
+    const statusLabel = summary.sleep.sleeping ? warn("ACTIVE") : "idle";
+    const lastLabel =
+      summary.sleep.lastSleepAt != null
+        ? ` · last ${formatAge(Date.now() - summary.sleep.lastSleepAt)}`
+        : "";
+    const nextLabel =
+      summary.sleep.nextSleepAt != null
+        ? ` · next in ${formatAge(summary.sleep.nextSleepAt - Date.now())}`
+        : "";
+    const agents = summary.sleep.agents.length
+      ? ` · ${summary.sleep.agents.length} agent${summary.sleep.agents.length === 1 ? "" : "s"}`
+      : "";
+    return `${statusLabel}${lastLabel}${nextLabel}${agents}`;
+  })();
+
   const storeLabel =
     summary.sessions.paths.length > 1
       ? `${summary.sessions.paths.length} stores`
@@ -368,6 +387,7 @@ export async function statusCommand(
     { Item: "Node service", Value: nodeDaemonValue },
     { Item: "Agents", Value: agentsValue },
     { Item: "Memory", Value: memoryValue },
+    { Item: "Sleep", Value: sleepValue },
     { Item: "Probes", Value: probesValue },
     { Item: "Events", Value: eventsValue },
     { Item: "Heartbeat", Value: heartbeatValue },

@@ -1,4 +1,5 @@
 import type { ChannelId } from "../channels/plugins/types.js";
+import type { SleepStatus } from "../sleep/manager.js";
 
 export type SessionStatus = {
   agentId?: string;
@@ -41,6 +42,7 @@ export type StatusSummary = {
     defaultAgentId: string;
     agents: HeartbeatStatus[];
   };
+  sleep?: SleepStatus;
   channelSummary: string[];
   queuedSystemEvents: string[];
   sessions: {
