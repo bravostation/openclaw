@@ -13,6 +13,145 @@ import {
   HumanDelaySchema,
 } from "./zod-schema.core.js";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Sleep System Schemas
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SleepShallowTasksSchema = z
+  .object({
+    configValidation: z.boolean().optional(),
+    credentialsCheck: z.boolean().optional(),
+    integrationProbe: z.boolean().optional(),
+    memoryIntegrity: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
+
+const SleepUpdatesSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    checkOpenclaw: z.boolean().optional(),
+    checkDependencies: z.boolean().optional(),
+    checkTools: z.boolean().optional(),
+    autoUpdate: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
+
+const SleepSecuritySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    npmAudit: z.boolean().optional(),
+    credentialScan: z.boolean().optional(),
+    advisoryCheck: z.boolean().optional(),
+    tlsCheck: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
+
+const SleepRadarSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    newModels: z.boolean().optional(),
+    protocolUpdates: z.boolean().optional(),
+    breakingChanges: z.boolean().optional(),
+    sources: z.array(z.string()).optional(),
+  })
+  .strict()
+  .optional();
+
+const SleepShallowSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    tasks: SleepShallowTasksSchema,
+    updates: SleepUpdatesSchema,
+    security: SleepSecuritySchema,
+    radar: SleepRadarSchema,
+  })
+  .strict()
+  .optional();
+
+const SleepMemoryPruningSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    maxAgeHours: z.number().int().positive().optional(),
+    decayFactor: z.number().min(0).max(1).optional(),
+  })
+  .strict()
+  .optional();
+
+const SleepMemoryCompactionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    minChunks: z.number().int().positive().optional(),
+  })
+  .strict()
+  .optional();
+
+const SleepCoreMemorySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    minRecurrence: z.number().int().positive().optional(),
+    minConfidence: z.number().min(0).max(1).optional(),
+  })
+  .strict()
+  .optional();
+
+const SleepMemoryPromotionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    minReinforcementsForLongTerm: z.number().int().positive().optional(),
+    minConfidenceForLongTerm: z.number().min(0).max(1).optional(),
+  })
+  .strict()
+  .optional();
+
+const SleepLlmReflectionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    provider: z.string().optional(),
+    model: z.string().optional(),
+    batchSize: z.number().int().positive().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+    pruneConfidenceThreshold: z.number().min(0).max(1).optional(),
+    promoteRelevanceThreshold: z.number().min(0).max(1).optional(),
+  })
+  .strict()
+  .optional();
+
+const SleepDeepSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    memoryPruning: SleepMemoryPruningSchema,
+    memoryCompaction: SleepMemoryCompactionSchema,
+    memoryPromotion: SleepMemoryPromotionSchema,
+    coreMemory: SleepCoreMemorySchema,
+    llmReflection: SleepLlmReflectionSchema,
+  })
+  .strict()
+  .optional();
+
+export const SleepSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    agents: z.array(z.string()).optional(),
+    window: z.string().optional(),
+    minIdleMinutes: z.number().int().positive().optional(),
+    allowInterrupt: z.boolean().optional(),
+    reportLevel: z.union([z.literal("summary"), z.literal("full")]).optional(),
+    timezone: z.string().optional(),
+    shallow: SleepShallowSchema,
+    deep: SleepDeepSchema,
+    notify: z.union([z.boolean(), z.literal("none"), z.literal("default"), z.string()]).optional(),
+    notifyTo: z.string().optional(),
+  })
+  .strict()
+  .optional();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent Defaults Schema
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const AgentDefaultsSchema = z
   .object({
     model: z
@@ -134,6 +273,7 @@ export const AgentDefaultsSchema = z
       ])
       .optional(),
     heartbeat: HeartbeatSchema,
+    sleep: SleepSchema,
     maxConcurrent: z.number().int().positive().optional(),
     subagents: z
       .object({

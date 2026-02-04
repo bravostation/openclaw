@@ -14,6 +14,7 @@ import { buildChannelSummary } from "../infra/channel-summary.js";
 import { resolveHeartbeatSummaryForAgent } from "../infra/heartbeat-runner.js";
 import { peekSystemEvents } from "../infra/system-events.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
+import { getSleepStatus } from "../sleep/manager.js";
 import { resolveLinkChannelContext } from "./status.link-channel.js";
 
 const classifyKey = (key: string, entry?: SessionEntry): SessionStatus["kind"] => {
@@ -83,6 +84,7 @@ export async function getStatusSummary(): Promise<StatusSummary> {
     colorize: true,
     includeAllowFrom: true,
   });
+  const sleep = getSleepStatus(cfg);
   const mainSessionKey = resolveMainSessionKey(cfg);
   const queuedSystemEvents = peekSystemEvents(mainSessionKey);
 
@@ -189,6 +191,7 @@ export async function getStatusSummary(): Promise<StatusSummary> {
       defaultAgentId: agentList.defaultId,
       agents: heartbeatAgents,
     },
+    sleep,
     channelSummary,
     queuedSystemEvents,
     sessions: {

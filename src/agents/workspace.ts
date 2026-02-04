@@ -27,6 +27,8 @@ export const DEFAULT_HEARTBEAT_FILENAME = "HEARTBEAT.md";
 export const DEFAULT_BOOTSTRAP_FILENAME = "BOOTSTRAP.md";
 export const DEFAULT_MEMORY_FILENAME = "MEMORY.md";
 export const DEFAULT_MEMORY_ALT_FILENAME = "memory.md";
+export const DEFAULT_MEMORIES_CORE_FILENAME = "MEMORIES-CORE.md";
+export const DEFAULT_MEMORIES_LONG_FILENAME = "MEMORIES-LONG.md";
 
 function stripFrontMatter(content: string): string {
   if (!content.startsWith("---")) {
@@ -64,7 +66,9 @@ export type WorkspaceBootstrapFileName =
   | typeof DEFAULT_HEARTBEAT_FILENAME
   | typeof DEFAULT_BOOTSTRAP_FILENAME
   | typeof DEFAULT_MEMORY_FILENAME
-  | typeof DEFAULT_MEMORY_ALT_FILENAME;
+  | typeof DEFAULT_MEMORY_ALT_FILENAME
+  | typeof DEFAULT_MEMORIES_CORE_FILENAME
+  | typeof DEFAULT_MEMORIES_LONG_FILENAME;
 
 export type WorkspaceBootstrapFile = {
   name: WorkspaceBootstrapFileName;
@@ -234,6 +238,30 @@ async function resolveMemoryBootstrapEntries(
   return deduped;
 }
 
+/**
+ * Resolve memory tier bootstrap files (MEMORIES-CORE.md, MEMORIES-LONG.md).
+ * These are created by the sleep system and loaded into agent context.
+ */
+async function resolveMemoryTierEntries(
+  resolvedDir: string,
+): Promise<Array<{ name: WorkspaceBootstrapFileName; filePath: string }>> {
+  const candidates: WorkspaceBootstrapFileName[] = [
+    DEFAULT_MEMORIES_CORE_FILENAME,
+    DEFAULT_MEMORIES_LONG_FILENAME,
+  ];
+  const entries: Array<{ name: WorkspaceBootstrapFileName; filePath: string }> = [];
+  for (const name of candidates) {
+    const filePath = path.join(resolvedDir, name);
+    try {
+      await fs.access(filePath);
+      entries.push({ name, filePath });
+    } catch {
+      // optional - these files are created by sleep system
+    }
+  }
+  return entries;
+}
+
 export async function loadWorkspaceBootstrapFiles(dir: string): Promise<WorkspaceBootstrapFile[]> {
   const resolvedDir = resolveUserPath(dir);
 
@@ -272,6 +300,7 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
   ];
 
   entries.push(...(await resolveMemoryBootstrapEntries(resolvedDir)));
+  entries.push(...(await resolveMemoryTierEntries(resolvedDir)));
 
   const result: WorkspaceBootstrapFile[] = [];
   for (const entry of entries) {

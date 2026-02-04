@@ -276,6 +276,25 @@ export async function statusCommand(
     return parts.length > 0 ? parts.join(", ") : "disabled";
   })();
 
+  const sleepValue = (() => {
+    if (!summary.sleep?.enabled) {
+      return muted("disabled");
+    }
+    const statusLabel = summary.sleep.sleeping ? warn("ACTIVE") : "idle";
+    const lastLabel =
+      summary.sleep.lastSleepAt != null
+        ? ` · last ${formatAge(Date.now() - summary.sleep.lastSleepAt)}`
+        : "";
+    const nextLabel =
+      summary.sleep.nextSleepAt != null
+        ? ` · next in ${formatAge(summary.sleep.nextSleepAt - Date.now())}`
+        : "";
+    const agents = summary.sleep.agents.length
+      ? ` · ${summary.sleep.agents.length} agent${summary.sleep.agents.length === 1 ? "" : "s"}`
+      : "";
+    return `${statusLabel}${lastLabel}${nextLabel}${agents}`;
+  })();
+
   const storeLabel =
     summary.sessions.paths.length > 1
       ? `${summary.sessions.paths.length} stores`
@@ -368,6 +387,7 @@ export async function statusCommand(
     { Item: "Node service", Value: nodeDaemonValue },
     { Item: "Agents", Value: agentsValue },
     { Item: "Memory", Value: memoryValue },
+    { Item: "Sleep", Value: sleepValue },
     { Item: "Probes", Value: probesValue },
     { Item: "Events", Value: eventsValue },
     { Item: "Heartbeat", Value: heartbeatValue },
