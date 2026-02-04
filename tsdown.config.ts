@@ -26,6 +26,14 @@ export default defineConfig([
     platform: "node",
   },
   {
+    dts: true,
+    entry: "src/sleep/index.ts",
+    outDir: "dist/sleep",
+    env,
+    fixedExtension: false,
+    platform: "node",
+  },
+  {
     entry: "src/extensionAPI.ts",
     env,
     fixedExtension: false,
