@@ -18,6 +18,10 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
       production:
         dependency-type: production
         update-types:
@@ -40,6 +44,10 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
       actions:
         patterns:
           - "*"
@@ -56,6 +64,10 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
       swift-deps:
         patterns:
           - "*"
@@ -72,6 +84,10 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
       swift-deps:
         patterns:
           - "*"
@@ -88,6 +104,10 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
       swift-deps:
         patterns:
           - "*"
@@ -104,6 +124,10 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
       android-deps:
         patterns:
           - "*"
