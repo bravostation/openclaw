@@ -315,6 +315,8 @@ describe("child followup requester continuation", () => {
         admission!.isCurrent,
         undefined,
         admission!.requesterOwner,
+        undefined,
+        admission!.requesterOwnerHop,
       )!;
       admission!.bindRunScope(scope);
       await inRun(admission!.runId, () =>

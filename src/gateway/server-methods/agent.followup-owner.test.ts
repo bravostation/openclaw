@@ -5,6 +5,7 @@ import {
   describe1BeforeEach0,
   getAgentTestMocks,
   makeContext,
+  mockMainSessionEntry,
   prime,
 } from "./agent.test-harness.js";
 // Provider/session fixtures are isolated; RPC admission, authority, and plugin effects are real.
@@ -100,13 +101,24 @@ describe("Gateway followup owner final effect", () => {
     await describe1AfterEach1();
   });
 
-  it.for(["observer error", "observer error before dispatch", "cancel before dispatch"] as const)(
+  it.for([
+    "observer error",
+    "observer error before dispatch",
+    "cancel before dispatch",
+    "non-direct requester",
+  ] as const)(
     "checks %s after RPC admission and before a versioned plugin writes",
     async (outcome, { signal }) => {
       const root = dirs.make("openclaw-followup-owner-effect-");
       const output = path.join(root, "owner-effect.txt");
       const config = { commands: { ownerAllowFrom: ["discord:owner-1"] } };
       prime(SESSION_ID, config);
+      // A requester continuation keeps its captured owner only where the requester
+      // continuation verifier grants it: an unspawned direct owner chat.
+      const strippedOwner = outcome === "non-direct requester";
+      if (!strippedOwner) {
+        mockMainSessionEntry({ sessionId: SESSION_ID, chatType: "direct" }, config);
+      }
       mocks.loadConfigReturn = config;
       const isOwner = () =>
         isConfiguredCommandOwner(mocks.loadConfigReturn, {
@@ -389,7 +401,7 @@ describe("Gateway followup owner final effect", () => {
             pluginError: String(pluginError),
             commands: mocks.agentCommand.mock.calls.length,
           }),
-        ).toBe(outcome !== "cancel before dispatch");
+        ).toBe(outcome !== "cancel before dispatch" && !strippedOwner);
         expect(existsSync(output)).toBe(false);
         if (outcome === "observer error") {
           completion.close(new Error("simulated observer loss during execution"));
@@ -417,6 +429,10 @@ describe("Gateway followup owner final effect", () => {
       expect(authorityReleased).toBe(true);
       if (outcome === "cancel before dispatch") {
         expect(mocks.agentCommand).not.toHaveBeenCalled();
+        expect(existsSync(output)).toBe(false);
+      } else if (strippedOwner) {
+        expect(mocks.agentCommand).toHaveBeenCalledOnce();
+        expect(String(pluginError)).toContain("owner_authority_required");
         expect(existsSync(output)).toBe(false);
       } else {
         expect(mocks.agentCommand).toHaveBeenCalledOnce();

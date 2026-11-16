@@ -178,6 +178,7 @@ export async function inRun<T>(
         undefined,
         admitted.requesterOwner,
         admitted.callerScopedCreation,
+        admitted.requesterOwnerHop,
       ),
       "admitted cron capability",
     );

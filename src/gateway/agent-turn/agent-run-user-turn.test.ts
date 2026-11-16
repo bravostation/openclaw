@@ -1,7 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as execHandoff from "../../agents/bash-tools.exec-approval-followup-state.js";
+import {
+  resetOwnerFollowupReceiptsForTest,
+  takeOwnerFollowupReceipt,
+} from "../../agents/subagents/owner-followup-receipts.js";
+import { issueSessionsSendOwnerFollowupReceipt } from "../../agents/tools/sessions-send-owner-followup.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { stageSessionPendingInput } from "../../config/sessions/session-accessor.pending-inputs.js";
+import { clearAgentRunContext, registerAgentRunContext } from "../../infra/agent-run-registry.js";
 import { SqliteWorkerError } from "../../infra/sqlite-worker-contract.js";
 import type { AgentRunRequest } from "../server-methods/agent-request-types.js";
 import type { GatewayCronCreatorAuthorityAdmission } from "../server-methods/cron-creator-authority-admission.js";
@@ -383,6 +389,8 @@ describe("prepareAgentRunUserTurn", () => {
       client: AgentTurnPrincipal | null;
       message?: string;
       admittedSessionId?: string;
+      inputProvenance?: AgentRunRequest["inputProvenance"];
+      info?: (line: string) => void;
     }) =>
       await prepareAgentRunUserTurn({
         onUserTurnMediaPersisted: vi.fn(),
@@ -405,7 +413,10 @@ describe("prepareAgentRunUserTurn", () => {
         offloadedRefs: [],
         runId: "owner-run",
         client: params.client,
-        context: { logGateway: { warn: vi.fn(), info: vi.fn() } } as unknown as AgentTurnContext,
+        ...(params.inputProvenance ? { inputProvenance: params.inputProvenance } : {}),
+        context: {
+          logGateway: { warn: vi.fn(), info: params.info ?? vi.fn() },
+        } as unknown as AgentTurnContext,
       });
 
     it("grants owner authority to a native subagent spawned by a verified owner direct turn", async () => {
@@ -652,6 +663,85 @@ describe("prepareAgentRunUserTurn", () => {
       });
       expect(turn.senderIsOwner).toBe(false);
     });
+
+    describe("owner followup receipts", () => {
+      const synthetic = { internal: { syntheticClient: true } } as unknown as AgentTurnPrincipal;
+      const followup = {
+        kind: "inter_session" as const,
+        sourceSessionKey: parentKey,
+        sourceTool: "sessions_send",
+      };
+      const issueFor = (child: SessionEntry) =>
+        issueSessionsSendOwnerFollowupReceipt({
+          sender: rootEntry(),
+          nativeTarget: true,
+          sameAgent: true,
+          senderRunId: "sender-turn",
+          senderSessionKey: parentKey,
+          targetSessionKey: childKey,
+          target: child,
+          idempotencyKey: "owner-run",
+        });
+      beforeEach(() => {
+        registerAgentRunContext("sender-turn", { agentId: "main", sessionKey: parentKey });
+      });
+      afterEach(() => {
+        clearAgentRunContext("sender-turn");
+        resetOwnerFollowupReceiptsForTest();
+      });
+
+      it("grants a host followup into a retained owner-spawned child and logs it", async () => {
+        const child = childEntry();
+        useStore({ [parentKey]: rootEntry(), [childKey]: child });
+        issueFor(child);
+        const info = vi.fn();
+        const turn = await prepare({
+          sessionKey: childKey,
+          sessionEntry: child,
+          client: synthetic,
+          inputProvenance: followup,
+          info,
+        });
+        expect(turn.senderIsOwner).toBe(true);
+        expect(info).toHaveBeenCalledWith(
+          `agent owner authority from owner followup: run=owner-run session=${childKey} sender=${parentKey} root=${parentKey} hops=1`,
+        );
+      });
+
+      it("does not grant a followup into a retained child without a receipt", async () => {
+        const child = childEntry();
+        useStore({ [parentKey]: rootEntry(), [childKey]: child });
+        const info = vi.fn();
+        const turn = await prepare({
+          sessionKey: childKey,
+          sessionEntry: child,
+          client: synthetic,
+          inputProvenance: followup,
+          info,
+        });
+        expect(turn.senderIsOwner).toBe(false);
+        expect(info).not.toHaveBeenCalled();
+      });
+
+      it("leaves the receipt untouched when a spawn receipt already granted the run", async () => {
+        const child = childEntry();
+        useStore({ [parentKey]: rootEntry(), [childKey]: child });
+        issueFor(child);
+        const info = vi.fn();
+        const turn = await prepare({
+          sessionKey: childKey,
+          sessionEntry: child,
+          client: nativeSubagent,
+          inputProvenance: followup,
+          info,
+        });
+        expect(turn.senderIsOwner).toBe(true);
+        expect(info).toHaveBeenCalledWith(
+          expect.stringContaining("agent owner authority from spawn receipt:"),
+        );
+        expect(takeOwnerFollowupReceipt("owner-run")).toBeDefined();
+      });
+    });
   });
 
   describe("requester continuation owner verifier", () => {
@@ -669,6 +759,7 @@ describe("prepareAgentRunUserTurn", () => {
         callerOrigin: { kind: "unknown" },
         isCurrent: () => true,
         requesterOwner: { isCurrent: () => true, senderId: "owner-handle" },
+        requesterOwnerHop: 1,
         ...overrides,
       }) as GatewayCronCreatorAuthorityAdmission;
     const resolve = (
@@ -687,7 +778,19 @@ describe("prepareAgentRunUserTurn", () => {
       expect(resolve(admission())).toEqual({
         granted: true,
         rootSessionKey: "agent:main:main",
-        hops: 0,
+        hops: 1,
+      });
+    });
+
+    it.each<[string, unknown]>([
+      ["missing", undefined],
+      ["zero", 0],
+      ["past the bound", 9],
+      ["fractional", 2.5],
+    ])("denies a %s requester owner hop", (_label, requesterOwnerHop) => {
+      expect(resolve(admission({ requesterOwnerHop: requesterOwnerHop as number }))).toEqual({
+        granted: false,
+        reason: "requester owner continuation hop is outside 1..8",
       });
     });
 

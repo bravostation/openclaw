@@ -204,6 +204,7 @@ export function dispatchAgentRunFromGateway(params: {
         undefined,
         params.cronCreatorAuthority.requesterOwner,
         params.cronCreatorAuthority.callerScopedCreation,
+        params.cronCreatorAuthority.requesterOwnerHop,
       )
     : undefined;
   if (cronCreatorAuthorityCapability) {

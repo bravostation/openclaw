@@ -745,6 +745,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/openclaw-tools.requester-yield.test.ts",
   "src/agents/openclaw-tools.sessions-steering.test.ts",
   "src/agents/openclaw-tools.sessions-send-child-coordination.test.ts",
+  "src/agents/openclaw-tools.sessions-send-owner-followup.test.ts",
   "src/agents/openclaw-tools.sessions.test.ts",
   "src/agents/tools/scoped-session-access.test.ts",
   "src/agents/tools/sessions-send-tool.queue-authority.test.ts",

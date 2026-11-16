@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEntry } from "../../config/sessions.js";
 import { startAgentRunExecution } from "./agent-run-execution-phase.js";
 import { createExecution } from "./agent-run-execution-phase.test-helpers.js";
+import { MAX_OWNER_CONTINUATION_HOPS } from "./spawn-owner-authority.js";
 import type { AgentTurnPrincipal } from "./types.js";
 
 const { dispatchAgentRunFromGateway } = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ describe("startAgentRunExecution requester continuation owner authority", () => 
     spawnedBy?: string;
     message?: string;
     admittedAuthority?: boolean;
+    ownerHop?: unknown;
   };
 
   const syntheticClient = {
@@ -45,6 +47,7 @@ describe("startAgentRunExecution requester continuation owner authority", () => 
       continuationCurrent: () => true,
       chatType: "direct",
       admittedAuthority: true,
+      ownerHop: 1,
       ...overrides,
     };
     const execution = createExecution();
@@ -84,6 +87,9 @@ describe("startAgentRunExecution requester continuation owner authority", () => 
                     accountId: "default",
                     senderId: "+15550000001",
                   },
+                  ...(testCase.ownerHop === undefined
+                    ? {}
+                    : { requesterOwnerHop: testCase.ownerHop as number }),
                 }
               : {}),
             isCurrent: testCase.continuationCurrent,
@@ -93,7 +99,12 @@ describe("startAgentRunExecution requester continuation owner authority", () => 
     });
     await startAgentRunExecution(execution.params);
     const dispatch = dispatchAgentRunFromGateway.mock.calls.at(-1)?.[0];
-    return { senderIsOwner: dispatch?.ingressOpts.senderIsOwner, info };
+    return {
+      senderIsOwner: dispatch?.ingressOpts.senderIsOwner,
+      info,
+      admitted: execution.params.prepared.cronCreatorAuthority,
+      dispatched: dispatch?.cronCreatorAuthority,
+    };
   }
 
   beforeEach(() => {
@@ -107,7 +118,7 @@ describe("startAgentRunExecution requester continuation owner authority", () => 
       expect(result.senderIsOwner).toBe(true);
       expect(result.info).toHaveBeenCalledWith(
         expect.stringContaining(
-          `agent owner authority from requester continuation: run=owner-test session=agent:main:main source=${sourceTool}`,
+          `agent owner authority from requester continuation: run=owner-test session=agent:main:main source=${sourceTool} hop=1`,
         ),
       );
     },
@@ -155,5 +166,55 @@ describe("startAgentRunExecution requester continuation owner authority", () => 
     const result = await dispatchedOwner(overrides);
     expect(result.senderIsOwner).toBe(false);
     expect(result.info).not.toHaveBeenCalled();
+  });
+
+  describe("continuation hop bound and owner strip (R1/R2)", () => {
+    it.each([1, 2, MAX_OWNER_CONTINUATION_HOPS])(
+      "grants and keeps the captured owner in the run scope at hop %s",
+      async (ownerHop) => {
+        const result = await dispatchedOwner({ ownerHop });
+        expect(result.senderIsOwner).toBe(true);
+        expect(result.dispatched).toBe(result.admitted);
+        expect(result.dispatched?.requesterOwner).toBeDefined();
+        expect(result.dispatched?.requesterOwnerHop).toBe(ownerHop);
+        expect(result.info).toHaveBeenCalledWith(expect.stringContaining(`hop=${ownerHop}`));
+      },
+    );
+
+    it.each<[string, unknown]>([
+      ["one past the hop bound", MAX_OWNER_CONTINUATION_HOPS + 1],
+      ["hop zero (fresh ingress forged as continuation)", 0],
+      ["a missing hop", undefined],
+      ["a negative hop", -1],
+      ["a fractional hop", 1.5],
+      ["a non-numeric hop", "1"],
+      ["a NaN hop", Number.NaN],
+    ])("denies and strips the owner for %s", async (_name, ownerHop) => {
+      const result = await dispatchedOwner({ ownerHop });
+      expect(result.senderIsOwner).toBe(false);
+      expect(result.info).not.toHaveBeenCalled();
+      expect(result.dispatched).toBeDefined();
+      expect(result.dispatched?.requesterOwner).toBeUndefined();
+      expect(result.dispatched?.requesterOwnerHop).toBeUndefined();
+      expect(Object.isFrozen(result.dispatched)).toBe(true);
+    });
+
+    it.each<[string, Case]>([
+      ["group requester", { chatType: "group" }],
+      ["owner removed", { ownerCurrent: () => false }],
+      ["external user input", { provenanceKind: "external_user", sourceTool: undefined }],
+      ["delegated requester", { spawnedBy: "agent:main:other" }],
+    ])("strips the owner from the run scope of a denied %s continuation", async (_n, c) => {
+      const result = await dispatchedOwner(c);
+      expect(result.senderIsOwner).toBe(false);
+      expect(result.dispatched?.requesterOwner).toBeUndefined();
+      expect(result.dispatched?.runId).toBe(result.admitted?.runId);
+      expect(result.dispatched?.managementEntitlement).toBe(result.admitted?.managementEntitlement);
+    });
+
+    it("leaves an admission without a captured owner untouched", async () => {
+      const result = await dispatchedOwner({ requesterOwner: false });
+      expect(result.dispatched).toBe(result.admitted);
+    });
   });
 });

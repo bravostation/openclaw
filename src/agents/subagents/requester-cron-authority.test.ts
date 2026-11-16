@@ -145,6 +145,7 @@ async function inAdminRun<T>(
     channel?: string;
     accountId?: string;
   },
+  requesterOwnerHop?: number,
 ) {
   const { operationalRunInstance } = createTestAdmittedRunContext(runId);
   const authority = claimAgentRunDelegatedAuthority(operationalRunInstance);
@@ -160,6 +161,8 @@ async function inAdminRun<T>(
     isCurrent,
     undefined,
     requesterOwner,
+    undefined,
+    requesterOwnerHop,
   )!;
   try {
     const withCaller = () =>
@@ -844,3 +847,129 @@ it.each(["complete", "revoked", "replaced"] as const)(
     expect(release).toHaveBeenCalledOnce();
   },
 );
+
+describe("requester owner continuation hops", () => {
+  const ownerEntitlement = { source: "channel-owner" as const, isCurrent: () => true };
+  const owner = () => ({ isCurrent: () => true, senderId: "synthetic-owner", channel: "imessage" });
+
+  async function yieldFrom(runId: string, scopeHop: number | undefined, withOwner = true) {
+    const ownerIdentity = withOwner ? owner() : undefined;
+    const batch = createBatch(runId);
+    await inAdminRun(
+      runId,
+      async () => expect(await mark(batch)).toBe(1),
+      undefined,
+      withOwner ? ownerEntitlement : { source: "control-ui-admin" },
+      ownerIdentity,
+      scopeHop,
+    );
+    expect(await settle(batch)).toBe(true);
+    return { batch, ownerIdentity };
+  }
+
+  it.each<[number | undefined, number]>([
+    [undefined, 1],
+    [1, 2],
+    [7, 8],
+    [8, 9],
+  ])("captures hop from the yielding scope (%s -> %s)", async (scopeHop, expected) => {
+    const { batch, ownerIdentity } = await yieldFrom(`hop-${scopeHop ?? "fresh"}`, scopeHop);
+    await dispatch(batch, async () => {
+      const admission = consume(batch)!;
+      expect(admission.requesterOwner).toBe(ownerIdentity);
+      expect(admission.requesterOwnerHop).toBe(expected);
+    });
+  });
+
+  it("captures neither owner nor hop from a stripped continuation scope", async () => {
+    const { batch } = await yieldFrom("stripped-yield", 3, false);
+    await dispatch(batch, async () => {
+      const admission = consume(batch)!;
+      expect(admission.requesterOwner).toBeUndefined();
+      expect(admission.requesterOwnerHop).toBeUndefined();
+    });
+  });
+
+  it("ignores a hop on a scope that carries no owner", () => {
+    const scope = createCronCreatorAuthorityCapability(
+      "ownerless",
+      { kind: "unknown" },
+      { source: "control-ui-admin" },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      0,
+    )!;
+    expect(scope.requesterOwnerHop).toBeUndefined();
+  });
+
+  it.each(["stripped", "granted", "hop mismatch", "foreign owner"] as const)(
+    "binds a continuation run scope that is %s only when it matches",
+    async (shape) => {
+      const { batch, ownerIdentity } = await yieldFrom(`bind-${shape.replace(" ", "-")}`, 2);
+      await dispatch(batch, async () => {
+        const admission = consume(batch)!;
+        expect(admission.requesterOwnerHop).toBe(3);
+        const scopeOwner =
+          shape === "stripped" ? undefined : shape === "foreign owner" ? owner() : ownerIdentity;
+        const scopeHop = shape === "hop mismatch" ? 4 : admission.requesterOwnerHop;
+        const scope = createCronCreatorAuthorityCapability(
+          "continuation",
+          { kind: "unknown" },
+          admission.managementEntitlement,
+          admission.isCurrent,
+          undefined,
+          scopeOwner,
+          undefined,
+          scopeHop,
+        )!;
+        if (shape === "stripped" || shape === "granted") {
+          expect(() => admission.bindRunScope(scope)).not.toThrow();
+        } else {
+          expect(() => admission.bindRunScope(scope)).toThrow("no longer owns");
+        }
+      });
+    },
+  );
+
+  it("inherits the yielding scope hop on a followup capture (R4)", async () => {
+    const [entry] = createBatch("followup-hop");
+    entry!.completionRequesterSessionId = fixture.session.sessionId;
+    const ownerIdentity = owner();
+    const retained = await inAdminRun(
+      "followup-hop",
+      async () =>
+        captureRequesterFollowupAuthority({
+          requesterTurnRunId: "followup-hop",
+          requesterAgentId: "main",
+          requesterSessionKey: SESSION,
+          requesterSessionId: fixture.session.sessionId,
+          sourceSessionKey: entry!.childSessionKey,
+          isCurrent: () => true,
+          release: vi.fn(),
+        }),
+      undefined,
+      ownerEntitlement,
+      ownerIdentity,
+      2,
+    );
+    retained!.bind({ entry: entry!, runs });
+    await withRequesterFollowupAuthority(entry!, "notice-hop", async () => {
+      const admitted = consumeRequesterCronAuthorityAdmission({
+        runId: "notice-hop",
+        sessionKey: SESSION,
+        sessionId: fixture.session.sessionId,
+        inputProvenance: {
+          kind: "inter_session",
+          sourceTool: "subagent_announce",
+          sourceSessionKey: entry!.childSessionKey,
+        },
+      });
+      expect(admitted?.requesterOwner).toBe(ownerIdentity);
+      expect(admitted?.requesterOwnerHop).toBe(3);
+    });
+    retireRequesterFollowupAuthority(entry!);
+    retained!.release();
+  });
+});

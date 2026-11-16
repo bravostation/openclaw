@@ -66,7 +66,7 @@ import { dispatchAgentRunWithMedia } from "./agent-run-media.js";
 import { settleUnstartedGatewayFollowup } from "./agent-run-subagent.js";
 import {
   annotateAgentRunUserTurnPrompt,
-  finalizePreparedAgentRunUserTurn,
+  finalizeAgentRunDispatch,
   releaseStoppedAgentRunUserTurn,
 } from "./agent-run-user-turn.js";
 
@@ -452,7 +452,7 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
                   params.request.lane !== "subagent",
               )
             : undefined;
-        finalizePreparedAgentRunUserTurn(prepared.userTurn, params, prepared.cronCreatorAuthority);
+        const cronCreatorAuthority = finalizeAgentRunDispatch(prepared, params);
         await dispatchAdmittedAgentRun(
           withAgentRunDispatchExecutionIdentity(
             {
@@ -463,7 +463,7 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
                 config: replyDispatchRuntime.config,
                 pluginGeneration: replyDispatchRuntime.pluginGeneration,
               },
-              cronCreatorAuthority: prepared.cronCreatorAuthority,
+              cronCreatorAuthority,
               ingressOpts: {
                 skillLibraryAuthoring,
                 message,

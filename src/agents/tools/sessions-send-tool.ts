@@ -680,6 +680,7 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
                 requesterAgentId,
                 requesterTurnRunId: opts?.requesterTurnRunId,
                 targetSession: targetSessionEntry,
+                ownerSender: opts?.senderIsOwner === true ? requesterSessionEntry : undefined,
                 withRequesterAuthority,
                 watch: params.watch === true,
               });
