@@ -4,7 +4,12 @@ import type { SessionEntry } from "../../config/sessions.js";
 import type { stageSessionPendingInput } from "../../config/sessions/session-accessor.pending-inputs.js";
 import { SqliteWorkerError } from "../../infra/sqlite-worker-contract.js";
 import type { AgentRunRequest } from "../server-methods/agent-request-types.js";
+import type { GatewayCronCreatorAuthorityAdmission } from "../server-methods/cron-creator-authority-admission.js";
 import { prepareAgentRunUserTurn } from "./agent-run-user-turn.js";
+import {
+  resolveRequesterContinuationOwnerAuthority,
+  resolveSpawnOwnerAuthority,
+} from "./spawn-owner-authority.js";
 import type { AgentTurnContext, AgentTurnPrincipal } from "./types.js";
 
 const mocks = vi.hoisted(() => ({
@@ -377,6 +382,7 @@ describe("prepareAgentRunUserTurn", () => {
       sessionEntry: SessionEntry;
       client: AgentTurnPrincipal | null;
       message?: string;
+      admittedSessionId?: string;
     }) =>
       await prepareAgentRunUserTurn({
         onUserTurnMediaPersisted: vi.fn(),
@@ -388,7 +394,7 @@ describe("prepareAgentRunUserTurn", () => {
         cfg: {},
         sessionEntry: params.sessionEntry,
         resolvedSessionKey: params.sessionKey,
-        admittedSessionId: params.sessionEntry.sessionId,
+        admittedSessionId: params.admittedSessionId ?? params.sessionEntry.sessionId,
         activeSessionAgentId: "main",
         suppressVisibleSessionEffects: true,
         requestedPromptPersistenceSuppression: false,
@@ -491,6 +497,151 @@ describe("prepareAgentRunUserTurn", () => {
       },
     );
 
+    const chainSessionId = (depth: number) =>
+      `00000000-0000-4000-8000-${String(depth).padStart(12, "0")}`;
+    const chainKey = (depth: number) =>
+      depth === 0 ? parentKey : `agent:main:subagent:depth-${depth}`;
+    const ownerChain = (edges: number) => {
+      const store: Record<string, SessionEntry> = {
+        [parentKey]: { ...rootEntry(), sessionId: chainSessionId(0), lifecycleRevision: "rev-0" },
+      };
+      for (let depth = 1; depth <= edges; depth += 1) {
+        store[chainKey(depth)] = childEntry({
+          sessionId: chainSessionId(depth),
+          lifecycleRevision: `rev-${depth}`,
+          spawnedBy: chainKey(depth - 1),
+          spawnedBySessionId: chainSessionId(depth - 1),
+          parentSessionLifecycleRevision: `rev-${depth - 1}`,
+        });
+      }
+      useStore(store);
+      return { leafKey: chainKey(edges), leaf: store[chainKey(edges)]! };
+    };
+    const resolveDirect = (
+      sessionKey: string,
+      sessionEntry: SessionEntry,
+      assertCurrent: () => void = () => {},
+    ) =>
+      resolveSpawnOwnerAuthority({
+        client: nativeSubagent,
+        cfg: {},
+        sessionEntry,
+        resolvedSessionKey: sessionKey,
+        admittedSessionId: sessionEntry.sessionId,
+        activeSessionAgentId: "main",
+        assertCurrent,
+      });
+
+    it("grants owner authority through exactly the maximum 16 owner spawn hops", async () => {
+      const { leafKey, leaf } = ownerChain(16);
+      await expect(resolveDirect(leafKey, leaf)).resolves.toEqual({
+        granted: true,
+        rootSessionKey: parentKey,
+        hops: 16,
+      });
+      const turn = await prepare({
+        sessionKey: leafKey,
+        sessionEntry: leaf,
+        client: nativeSubagent,
+      });
+      expect(turn.senderIsOwner).toBe(true);
+    });
+
+    it("denies owner authority one hop beyond the 16 hop limit", async () => {
+      const { leafKey, leaf } = ownerChain(17);
+      await expect(resolveDirect(leafKey, leaf)).resolves.toEqual({
+        granted: false,
+        reason: "session lineage exceeds 16 hops",
+      });
+      const turn = await prepare({
+        sessionKey: leafKey,
+        sessionEntry: leaf,
+        client: nativeSubagent,
+      });
+      expect(turn.senderIsOwner).toBe(false);
+    });
+
+    it("denies a receipt without a parent revision even when the parent has none either", async () => {
+      const child = childEntry({ parentSessionLifecycleRevision: undefined });
+      useStore({
+        [parentKey]: { ...rootEntry(), lifecycleRevision: undefined },
+        [childKey]: child,
+      });
+      const turn = await prepare({
+        sessionKey: childKey,
+        sessionEntry: child,
+        client: nativeSubagent,
+      });
+      expect(turn.senderIsOwner).toBe(false);
+    });
+
+    it("denies a spawn receipt whose recorded parent key disagrees with spawnedBy", async () => {
+      const child = childEntry({ parentSessionKey: "agent:main:subagent:elsewhere" });
+      useStore({ [parentKey]: rootEntry(), [childKey]: child });
+      const turn = await prepare({
+        sessionKey: childKey,
+        sessionEntry: child,
+        client: nativeSubagent,
+      });
+      expect(turn.senderIsOwner).toBe(false);
+    });
+
+    it("denies an owner receipt when the admitted session incarnation differs", async () => {
+      const child = childEntry();
+      useStore({ [parentKey]: rootEntry(), [childKey]: child });
+      const turn = await prepare({
+        sessionKey: childKey,
+        sessionEntry: child,
+        client: nativeSubagent,
+        admittedSessionId: "55555555-5555-4555-8555-555555555555",
+      });
+      expect(turn.senderIsOwner).toBe(false);
+    });
+
+    it("denies a cyclic owner lineage at the first repeated session", async () => {
+      const loopKey = "agent:main:subagent:loop";
+      const child = childEntry({
+        spawnedBy: loopKey,
+        spawnedBySessionId: GRANDCHILD_ID,
+        parentSessionLifecycleRevision: "rev-loop",
+      });
+      const loop = childEntry({
+        sessionId: GRANDCHILD_ID,
+        lifecycleRevision: "rev-loop",
+        spawnedBy: childKey,
+        spawnedBySessionId: CHILD_ID,
+        parentSessionLifecycleRevision: "rev-child",
+      });
+      useStore({ [childKey]: child, [loopKey]: loop });
+      await expect(resolveDirect(childKey, child)).resolves.toEqual({
+        granted: false,
+        reason: `session lineage at ${childKey} is cyclic or crosses agents`,
+      });
+      expect(mocks.loadSessionEntry).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ["an empty spawnedBy", { spawnedBy: "" }],
+      ["a non-UUID parent session id", { spawnedBySessionId: "parent-session" }],
+    ])("rejects a spawn receipt with %s as incomplete", async (_label, overrides) => {
+      const child = childEntry(overrides);
+      const root = { ...rootEntry(), sessionId: child.spawnedBySessionId! };
+      useStore({ "": root, [parentKey]: root, [childKey]: child });
+      await expect(resolveDirect(childKey, child)).resolves.toEqual({
+        granted: false,
+        reason: `session ${childKey} has an incomplete spawn receipt`,
+      });
+    });
+
+    it("stops the lineage walk when the run stops being current after a parent load", async () => {
+      const child = childEntry();
+      useStore({ [parentKey]: rootEntry(), [childKey]: child });
+      const assertCurrent = vi.fn(() => {
+        throw new Error("run superseded");
+      });
+      await expect(resolveDirect(childKey, child, assertCurrent)).rejects.toThrow("run superseded");
+    });
+
     it("does not grant owner authority to an unspawned non-admin session", async () => {
       const root = rootEntry();
       useStore({ [parentKey]: root });
@@ -500,6 +651,62 @@ describe("prepareAgentRunUserTurn", () => {
         client: nativeSubagent,
       });
       expect(turn.senderIsOwner).toBe(false);
+    });
+  });
+
+  describe("requester continuation owner verifier", () => {
+    const synthetic = { internal: { syntheticClient: true } } as unknown as AgentTurnPrincipal;
+    const settle = {
+      kind: "inter_session" as const,
+      sourceTool: "subagent_settle",
+      sourceSessionKey: "agent:main:subagent:child",
+    };
+    const admission = (
+      overrides: Partial<GatewayCronCreatorAuthorityAdmission> = {},
+    ): GatewayCronCreatorAuthorityAdmission =>
+      ({
+        runId: "continuation",
+        callerOrigin: { kind: "unknown" },
+        isCurrent: () => true,
+        requesterOwner: { isCurrent: () => true, senderId: "owner-handle" },
+        ...overrides,
+      }) as GatewayCronCreatorAuthorityAdmission;
+    const resolve = (
+      cronCreatorAuthority: GatewayCronCreatorAuthorityAdmission,
+      requesterSessionKey = "agent:main:main",
+    ) =>
+      resolveRequesterContinuationOwnerAuthority({
+        client: synthetic,
+        cronCreatorAuthority,
+        inputProvenance: settle,
+        sessionEntry: { sessionId: "sess-main", updatedAt: 1, chatType: "direct" },
+        requesterSessionKey,
+      });
+
+    it("grants a current captured owner on an unspawned direct requester", () => {
+      expect(resolve(admission())).toEqual({
+        granted: true,
+        rootSessionKey: "agent:main:main",
+        hops: 0,
+      });
+    });
+
+    it.each([
+      ["no requester owner", admission({ requesterOwner: undefined })],
+      ["a local operator origin", admission({ callerOrigin: { kind: "local" } })],
+      [
+        "no continuation currentness check",
+        admission({ isCurrent: undefined as unknown as () => boolean }),
+      ],
+    ])("denies an admission with %s before evaluating currentness", (_label, authority) => {
+      expect(resolve(authority)).toEqual({ granted: false, reason: "no captured requester owner" });
+    });
+
+    it("denies a continuation with no resolved requester session key", () => {
+      expect(resolve(admission(), "")).toEqual({
+        granted: false,
+        reason: "requester is not a direct owner chat",
+      });
     });
   });
 });
