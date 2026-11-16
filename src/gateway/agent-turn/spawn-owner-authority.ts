@@ -1,6 +1,11 @@
 import type { SessionEntry } from "../../config/sessions.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
+import {
+  isCompletionReportInputProvenance,
+  type InputProvenance,
+} from "../../sessions/input-provenance.js";
+import type { GatewayCronCreatorAuthorityAdmission } from "../server-methods/cron-creator-authority-admission.js";
 import { loadGatewaySessionEntryReadOnlyInWorker } from "../session-utils-store-worker.js";
 import type { AgentTurnPrincipal } from "./types.js";
 
@@ -92,4 +97,75 @@ export async function resolveSpawnOwnerAuthority(params: {
     sessionKey = parentKey;
   }
   return deny(`session lineage exceeds ${MAX_SPAWN_OWNER_HOPS} hops`);
+}
+
+/**
+ * Derive owner authority for a requester continuation turn, such as a subagent
+ * settle or completion wake that resumes the requester after it yielded.
+ *
+ * The owner principal comes only from the live requester-owner capability that a
+ * fresh, configured-owner channel ingress minted and that the requester's yield
+ * captured for exactly this admitted continuation. Both the capability and the
+ * continuation custody must still be current, and the requester must be an
+ * unspawned direct-chat session. Message text and transcript history are ignored.
+ */
+export function resolveRequesterContinuationOwnerAuthority(params: {
+  client: AgentTurnPrincipal | null;
+  cronCreatorAuthority?: GatewayCronCreatorAuthorityAdmission;
+  inputProvenance?: InputProvenance;
+  sessionEntry?: SessionEntry;
+  requesterSessionKey?: string;
+}): SpawnOwnerAuthority {
+  const deny = (reason: string): SpawnOwnerAuthority => ({ granted: false, reason });
+  if (params.client?.internal?.syntheticClient !== true) {
+    return deny("not a host-dispatched continuation");
+  }
+  if (!isCompletionReportInputProvenance(params.inputProvenance)) {
+    return deny("not a subagent completion continuation");
+  }
+  const authority = params.cronCreatorAuthority;
+  const owner = authority?.requesterOwner;
+  if (!authority || !owner || authority.callerOrigin.kind !== "unknown" || !authority.isCurrent) {
+    return deny("no captured requester owner");
+  }
+  try {
+    if (authority.isCurrent() !== true || owner.isCurrent() !== true) {
+      return deny("requester owner no longer current");
+    }
+  } catch {
+    return deny("requester owner no longer current");
+  }
+  const entry = params.sessionEntry;
+  if (!params.requesterSessionKey || !entry || entry.spawnedBy || entry.chatType !== "direct") {
+    return deny("requester is not a direct owner chat");
+  }
+  return { granted: true, rootSessionKey: params.requesterSessionKey, hops: 0 };
+}
+
+/** Owner bit for a dispatched continuation turn; logs only actual grants. */
+export function resolveContinuationSenderIsOwner(
+  params: {
+    client: AgentTurnPrincipal | null;
+    inputProvenance?: InputProvenance;
+    sessionEntry?: SessionEntry;
+    resolvedSessionKey?: string;
+    runId: string;
+    context: { logGateway: { info: (message: string) => void } };
+  },
+  cronCreatorAuthority: GatewayCronCreatorAuthorityAdmission | undefined,
+): boolean {
+  const continuationOwner = resolveRequesterContinuationOwnerAuthority({
+    client: params.client,
+    cronCreatorAuthority,
+    inputProvenance: params.inputProvenance,
+    sessionEntry: params.sessionEntry,
+    requesterSessionKey: params.resolvedSessionKey,
+  });
+  if (!continuationOwner.granted) {
+    return false;
+  }
+  params.context.logGateway.info(
+    `agent owner authority from requester continuation: run=${params.runId} session=${continuationOwner.rootSessionKey} source=${params.inputProvenance?.sourceTool ?? "unknown"}`,
+  );
+  return true;
 }
