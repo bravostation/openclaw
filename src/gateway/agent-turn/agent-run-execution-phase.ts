@@ -452,7 +452,7 @@ async function executeAgentRun(params: StartAgentRunExecutionParams): Promise<vo
                   params.request.lane !== "subagent",
               )
             : undefined;
-        finalizePreparedAgentRunUserTurn(prepared.userTurn);
+        finalizePreparedAgentRunUserTurn(prepared.userTurn, params, prepared.cronCreatorAuthority);
         await dispatchAdmittedAgentRun(
           withAgentRunDispatchExecutionIdentity(
             {

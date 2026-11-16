@@ -43,6 +43,7 @@ import {
 import { hasGatewayAdminScope } from "../operator-scopes.js";
 import type { AgentRunRequest } from "../server-methods/agent-request-types.js";
 import { resolveSessionRuntimeCwd } from "../server-methods/agent-session-reset.js";
+import type { GatewayCronCreatorAuthorityAdmission } from "../server-methods/cron-creator-authority-admission.js";
 import { gatewayClientSenderFields } from "../server-methods/gateway-client-identity.js";
 import { resolveGatewayInputParticipant } from "../session-input-participant.js";
 import { readSessionSendDeliveryAdmission } from "../session-send-delivery.js";
@@ -53,6 +54,10 @@ import {
   type RestoredCronContinuation,
 } from "./agent-handler-helpers.js";
 import type { RequesterSettleWakeReplay } from "./internal-facade.types.js";
+import {
+  resolveContinuationSenderIsOwner,
+  resolveSpawnOwnerAuthority,
+} from "./spawn-owner-authority.js";
 import type { AgentTurnContext, AgentTurnIo, AgentTurnPrincipal } from "./types.js";
 
 export type PreparedAgentRunUserTurn = {
@@ -212,9 +217,26 @@ export async function prepareAgentRunUserTurn(params: {
       throw new Error("exec approval followup runtime handoff is unavailable");
     }
 
-    const senderIsOwner = params.restoredCronContinuation
+    let senderIsOwner = params.restoredCronContinuation
       ? true
       : hasGatewayAdminScope(params.client);
+    if (!senderIsOwner) {
+      const spawnOwner = await resolveSpawnOwnerAuthority({
+        client: params.client,
+        cfg: params.cfgForAgent ?? params.cfg,
+        sessionEntry: params.sessionEntry,
+        resolvedSessionKey: params.resolvedSessionKey,
+        admittedSessionId: params.admittedSessionId,
+        activeSessionAgentId: params.activeSessionAgentId,
+        assertCurrent: params.assertCurrent,
+      });
+      if (spawnOwner.granted) {
+        senderIsOwner = true;
+        params.context.logGateway.info(
+          `agent owner authority from spawn receipt: run=${params.runId} session=${params.resolvedSessionKey} root=${spawnOwner.rootSessionKey} hops=${spawnOwner.hops}`,
+        );
+      }
+    }
     const settleWakeReplay = params.settleWakeReplay;
     if (
       settleWakeReplay &&
@@ -458,7 +480,15 @@ export function annotateAgentRunUserTurnPrompt(params: {
   return { message, execApprovalContinuationPromptRange };
 }
 
-export function finalizePreparedAgentRunUserTurn(prepared: PreparedAgentRunUserTurn): void {
+/** Finalizes dispatch facts after admission, including a captured requester continuation owner. */
+export function finalizePreparedAgentRunUserTurn(
+  prepared: PreparedAgentRunUserTurn,
+  continuation?: Parameters<typeof resolveContinuationSenderIsOwner>[0],
+  cronCreatorAuthority?: GatewayCronCreatorAuthorityAdmission,
+): void {
+  if (!prepared.senderIsOwner && continuation) {
+    prepared.senderIsOwner = resolveContinuationSenderIsOwner(continuation, cronCreatorAuthority);
+  }
   const handoffId = prepared.claimedExecApprovalFollowupHandoffId;
   if (!handoffId) {
     return;
