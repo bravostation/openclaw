@@ -53,6 +53,7 @@ import {
   type RestoredCronContinuation,
 } from "./agent-handler-helpers.js";
 import type { RequesterSettleWakeReplay } from "./internal-facade.types.js";
+import { resolveSpawnOwnerAuthority } from "./spawn-owner-authority.js";
 import type { AgentTurnContext, AgentTurnIo, AgentTurnPrincipal } from "./types.js";
 
 export type PreparedAgentRunUserTurn = {
@@ -212,9 +213,26 @@ export async function prepareAgentRunUserTurn(params: {
       throw new Error("exec approval followup runtime handoff is unavailable");
     }
 
-    const senderIsOwner = params.restoredCronContinuation
+    let senderIsOwner = params.restoredCronContinuation
       ? true
       : hasGatewayAdminScope(params.client);
+    if (!senderIsOwner) {
+      const spawnOwner = await resolveSpawnOwnerAuthority({
+        client: params.client,
+        cfg: params.cfgForAgent ?? params.cfg,
+        sessionEntry: params.sessionEntry,
+        resolvedSessionKey: params.resolvedSessionKey,
+        admittedSessionId: params.admittedSessionId,
+        activeSessionAgentId: params.activeSessionAgentId,
+        assertCurrent: params.assertCurrent,
+      });
+      if (spawnOwner.granted) {
+        senderIsOwner = true;
+        params.context.logGateway.info(
+          `agent owner authority from spawn receipt: run=${params.runId} session=${params.resolvedSessionKey} root=${spawnOwner.rootSessionKey} hops=${spawnOwner.hops}`,
+        );
+      }
+    }
     const settleWakeReplay = params.settleWakeReplay;
     if (
       settleWakeReplay &&
