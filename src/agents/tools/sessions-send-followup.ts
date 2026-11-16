@@ -1,5 +1,6 @@
 import { formatErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import type { SessionEntry } from "../../config/sessions.js";
 import { isCronRunSessionKey } from "../../sessions/session-key-utils.js";
 import { registerSessionStateWatch } from "../../sessions/session-state-events.js";
 import {
@@ -10,7 +11,6 @@ import { withFollowupRequest } from "../subagents/completion/session-followup-co
 import type { FollowupRequest } from "../subagents/completion/session-followup-completion.types.js";
 import { subagentRuns } from "../subagents/registry/subagent-registry-memory.js";
 import { getLatestLiveSubagentRunByChildSessionKey } from "../subagents/registry/subagent-registry-read.js";
-import type { AgentStepSession } from "./agent-step.js";
 import {
   captureGatewayToolCallerAssertion,
   getGatewayToolCallerIdentity,
@@ -18,6 +18,10 @@ import {
 } from "./gateway-caller-context.js";
 import { runWithGatewayToolCleanupContext } from "./in-process-gateway.js";
 import { prepareSessionsSendFollowup } from "./sessions-send-followup-custody.js";
+import {
+  issueSessionsSendOwnerFollowupReceipt,
+  type OwnerFollowupTarget,
+} from "./sessions-send-owner-followup.js";
 import { startSessionsSendReplyFlow } from "./sessions-send-reply-flow.js";
 import {
   startSessionsSendAgentRun,
@@ -87,7 +91,9 @@ export async function dispatchSessionsSendFollowup(
     requesterSessionKey: string;
     requesterAgentId: string;
     requesterTurnRunId?: string;
-    targetSession?: AgentStepSession;
+    targetSession?: OwnerFollowupTarget;
+    /** Sender entry, present only when the host verified the sending turn as owner. */
+    ownerSender?: SessionEntry;
     withRequesterAuthority?: <T>(run: () => T) => T;
   },
 ) {
@@ -140,29 +146,53 @@ export async function dispatchSessionsSendFollowup(
     assertCallerCurrent?.();
     request?.custody.assertCurrent();
   };
-  const { start, completion } =
-    "ok" in active
-      ? { start: active, completion: undefined }
-      : await startSessionsSendFollowup(
-          registryTurn ? undefined : request,
-          {
-            ...params,
-            ...active,
-            ...(registryTurn
-              ? {
-                  retainAcceptance: true,
-                  assertDispatchCurrent: () => {
-                    if (!admissionOpen) {
-                      throw new Error("Child followup admission was closed.");
-                    }
-                    assertCurrent();
-                    params.assertDispatchCurrent?.();
-                  },
-                }
-              : {}),
-          },
-          replyContext,
-        );
+  const revokeOwnerFollowup =
+    "ok" in active || active.fallbackSessionKey
+      ? () => {}
+      : issueSessionsSendOwnerFollowupReceipt({
+          sender: options.ownerSender,
+          mode: params.mode,
+          nativeTarget: options.nativeChild,
+          sameAgent: params.sendParams.agentId === options.requesterAgentId,
+          senderRunId: options.requesterTurnRunId,
+          senderSessionKey: options.requesterSessionKey,
+          targetSessionKey: params.sessionStoreTarget.canonicalKey,
+          target: options.targetSession,
+          idempotencyKey: params.runId,
+        });
+  let started: Awaited<ReturnType<typeof startSessionsSendFollowup>> | undefined;
+  try {
+    started =
+      "ok" in active
+        ? { start: active, completion: undefined }
+        : await startSessionsSendFollowup(
+            registryTurn ? undefined : request,
+            {
+              ...params,
+              ...active,
+              ...(registryTurn
+                ? {
+                    retainAcceptance: true,
+                    assertDispatchCurrent: () => {
+                      if (!admissionOpen) {
+                        throw new Error("Child followup admission was closed.");
+                      }
+                      assertCurrent();
+                      params.assertDispatchCurrent?.();
+                    },
+                  }
+                : {}),
+            },
+            replyContext,
+          );
+  } finally {
+    // Only a new queued turn under this exact run id may consume the owner grant.
+    const begun = started?.start;
+    if (!begun?.ok || begun.targetDisposition !== "queued" || begun.runId !== params.runId) {
+      revokeOwnerFollowup();
+    }
+  }
+  const { start, completion } = started;
   try {
     if (start.ok && registryTurn) {
       const { registerSubagentRun, adoptSubagentRunForRequesterTurn } =

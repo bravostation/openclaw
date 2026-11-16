@@ -54,7 +54,11 @@ import {
   type RestoredCronContinuation,
 } from "./agent-handler-helpers.js";
 import type { RequesterSettleWakeReplay } from "./internal-facade.types.js";
-import { resolveContinuationOwner, resolveSpawnOwnerAuthority } from "./spawn-owner-authority.js";
+import {
+  resolveContinuationOwner,
+  resolveOwnerFollowupAuthority,
+  resolveSpawnOwnerAuthority,
+} from "./spawn-owner-authority.js";
 import type { AgentTurnContext, AgentTurnIo, AgentTurnPrincipal } from "./types.js";
 
 export type PreparedAgentRunUserTurn = {
@@ -232,6 +236,24 @@ export async function prepareAgentRunUserTurn(params: {
         params.context.logGateway.info(
           `agent owner authority from spawn receipt: run=${params.runId} session=${params.resolvedSessionKey} root=${spawnOwner.rootSessionKey} hops=${spawnOwner.hops}`,
         );
+      } else {
+        const followupOwner = await resolveOwnerFollowupAuthority({
+          client: params.client,
+          cfg: params.cfgForAgent ?? params.cfg,
+          runId: params.runId,
+          inputProvenance: params.inputProvenance,
+          sessionEntry: params.sessionEntry,
+          resolvedSessionKey: params.resolvedSessionKey,
+          admittedSessionId: params.admittedSessionId,
+          activeSessionAgentId: params.activeSessionAgentId,
+          assertCurrent: params.assertCurrent,
+        });
+        if (followupOwner.granted) {
+          senderIsOwner = true;
+          params.context.logGateway.info(
+            `agent owner authority from owner followup: run=${params.runId} session=${params.resolvedSessionKey} sender=${followupOwner.senderSessionKey} root=${followupOwner.rootSessionKey} hops=${followupOwner.hops}`,
+          );
+        }
       }
     }
     const settleWakeReplay = params.settleWakeReplay;

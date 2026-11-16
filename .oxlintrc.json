@@ -457,6 +457,13 @@
         "max-lines": ["error", { "max": 733, "skipBlankLines": true, "skipComments": true }]
       }
     },
+    // Owner followup receipts pass the host-verified sender entry: one line over the release cap.
+    {
+      "files": ["src/agents/tools/sessions-send-tool.ts"],
+      "rules": {
+        "max-lines": ["error", { "max": 701, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
     {
       "files": ["src/infra/sqlite-database-admission.ts"],
       "rules": {

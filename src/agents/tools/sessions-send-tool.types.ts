@@ -8,6 +8,8 @@ export type SessionsSendToolOptions = {
   agentSessionKey?: string;
   agentSessionId?: string;
   requesterTurnRunId?: string;
+  /** Host-verified owner flag of the sending turn; never model input. */
+  senderIsOwner?: boolean;
   inheritedToolPolicySource?: "sender";
   agentChannel?: string;
   requesterOrigin?: DeliveryContext;

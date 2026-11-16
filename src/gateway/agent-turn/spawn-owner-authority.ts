@@ -1,5 +1,10 @@
+import {
+  takeOwnerFollowupReceipt,
+  type OwnerFollowupReceipt,
+} from "../../agents/subagents/owner-followup-receipts.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { getAgentRunContext } from "../../infra/agent-run-registry.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
 import {
   isCompletionReportInputProvenance,
@@ -40,10 +45,22 @@ export async function resolveSpawnOwnerAuthority(params: {
   activeSessionAgentId: string;
   assertCurrent: () => void;
 }): Promise<SpawnOwnerAuthority> {
-  const deny = (reason: string): SpawnOwnerAuthority => ({ granted: false, reason });
   if (params.client?.internal?.agentRunTracking !== "native_subagent") {
-    return deny("not a host-dispatched native subagent run");
+    return { granted: false, reason: "not a host-dispatched native subagent run" };
   }
+  return await walkOwnerSpawnLineage(params);
+}
+
+/** Every hop up to a current direct-chat root must be an owner spawn of the same agent. */
+async function walkOwnerSpawnLineage(params: {
+  cfg: OpenClawConfig;
+  sessionEntry?: SessionEntry;
+  resolvedSessionKey?: string;
+  admittedSessionId: string;
+  activeSessionAgentId: string;
+  assertCurrent: () => void;
+}): Promise<SpawnOwnerAuthority> {
+  const deny = (reason: string): SpawnOwnerAuthority => ({ granted: false, reason });
   const agentId = params.activeSessionAgentId;
   let entry = params.sessionEntry;
   let sessionKey = params.resolvedSessionKey;
@@ -99,6 +116,73 @@ export async function resolveSpawnOwnerAuthority(params: {
     sessionKey = parentKey;
   }
   return deny(`session lineage exceeds ${MAX_SPAWN_OWNER_HOPS} hops`);
+}
+
+/**
+ * Derive owner authority for a sessions_send followup that an owner turn sent into
+ * its own retained native child.
+ *
+ * The owner principal comes only from a single-use host-memory receipt that the
+ * sender's owner turn issued for this exact agent run, target incarnation and
+ * sender incarnation. Wire clients cannot present it. The receipt is consumed on
+ * first evaluation, dies with the sender run or after ten minutes, and the target's
+ * full spawn lineage must still verify as it does for a spawned child.
+ */
+export async function resolveOwnerFollowupAuthority(params: {
+  client: AgentTurnPrincipal | null;
+  cfg: OpenClawConfig;
+  runId: string;
+  inputProvenance?: InputProvenance;
+  sessionEntry?: SessionEntry;
+  resolvedSessionKey?: string;
+  admittedSessionId: string;
+  activeSessionAgentId: string;
+  assertCurrent: () => void;
+  now?: number;
+}): Promise<SpawnOwnerAuthority & { senderSessionKey?: string }> {
+  const deny = (reason: string): SpawnOwnerAuthority => ({ granted: false, reason });
+  if (params.client?.internal?.syntheticClient !== true) {
+    return deny("not a host-dispatched followup");
+  }
+  const provenance = params.inputProvenance;
+  if (
+    provenance?.kind !== "inter_session" ||
+    provenance.sourceTool !== "sessions_send" ||
+    !provenance.sourceSessionKey
+  ) {
+    return deny("not a sessions_send followup");
+  }
+  const receipt: OwnerFollowupReceipt | undefined = takeOwnerFollowupReceipt(params.runId);
+  if (!receipt || receipt.idempotencyKey !== params.runId) {
+    return deny("no owner followup receipt for this run");
+  }
+  if (receipt.expiresAt <= (params.now ?? Date.now())) {
+    return deny("owner followup receipt expired");
+  }
+  if (receipt.senderSessionKey !== provenance.sourceSessionKey) {
+    return deny("followup source does not match the receipt sender");
+  }
+  if (getAgentRunContext(receipt.senderRunId)?.sessionKey !== receipt.senderSessionKey) {
+    return deny("owner followup sender run has ended");
+  }
+  const entry = params.sessionEntry;
+  if (
+    params.resolvedSessionKey !== receipt.targetSessionKey ||
+    params.admittedSessionId !== receipt.targetSessionId ||
+    entry?.sessionId !== receipt.targetSessionId
+  ) {
+    return deny("followup target does not match the receipt");
+  }
+  if (
+    entry.spawnedBy !== receipt.senderSessionKey ||
+    entry.spawnedBySenderIsOwner !== true ||
+    entry.spawnedBySessionId !== receipt.senderSessionId ||
+    entry.parentSessionLifecycleRevision !== receipt.senderRevision
+  ) {
+    return deny("followup target is not a direct owner spawn of the sender incarnation");
+  }
+  const lineage = await walkOwnerSpawnLineage(params);
+  return lineage.granted ? { ...lineage, senderSessionKey: receipt.senderSessionKey } : lineage;
 }
 
 /**
