@@ -669,6 +669,7 @@ describe("prepareAgentRunUserTurn", () => {
         callerOrigin: { kind: "unknown" },
         isCurrent: () => true,
         requesterOwner: { isCurrent: () => true, senderId: "owner-handle" },
+        requesterOwnerHop: 1,
         ...overrides,
       }) as GatewayCronCreatorAuthorityAdmission;
     const resolve = (
@@ -687,7 +688,19 @@ describe("prepareAgentRunUserTurn", () => {
       expect(resolve(admission())).toEqual({
         granted: true,
         rootSessionKey: "agent:main:main",
-        hops: 0,
+        hops: 1,
+      });
+    });
+
+    it.each<[string, unknown]>([
+      ["missing", undefined],
+      ["zero", 0],
+      ["past the bound", 9],
+      ["fractional", 2.5],
+    ])("denies a %s requester owner hop", (_label, requesterOwnerHop) => {
+      expect(resolve(admission({ requesterOwnerHop: requesterOwnerHop as number }))).toEqual({
+        granted: false,
+        reason: "requester owner continuation hop is outside 1..8",
       });
     });
 

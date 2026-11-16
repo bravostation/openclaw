@@ -54,10 +54,7 @@ import {
   type RestoredCronContinuation,
 } from "./agent-handler-helpers.js";
 import type { RequesterSettleWakeReplay } from "./internal-facade.types.js";
-import {
-  resolveContinuationSenderIsOwner,
-  resolveSpawnOwnerAuthority,
-} from "./spawn-owner-authority.js";
+import { resolveContinuationOwner, resolveSpawnOwnerAuthority } from "./spawn-owner-authority.js";
 import type { AgentTurnContext, AgentTurnIo, AgentTurnPrincipal } from "./types.js";
 
 export type PreparedAgentRunUserTurn = {
@@ -480,15 +477,44 @@ export function annotateAgentRunUserTurnPrompt(params: {
   return { message, execApprovalContinuationPromptRange };
 }
 
-/** Finalizes dispatch facts after admission, including a captured requester continuation owner. */
+/**
+ * Finalizes dispatch facts after admission, including a captured requester continuation owner.
+ * Returns the admission the dispatched run scope may carry: a captured requester owner that
+ * was not granted to this exact run is stripped so no later yield can re-capture it.
+ */
 export function finalizePreparedAgentRunUserTurn(
   prepared: PreparedAgentRunUserTurn,
-  continuation?: Parameters<typeof resolveContinuationSenderIsOwner>[0],
+  continuation?: Parameters<typeof resolveContinuationOwner>[0],
   cronCreatorAuthority?: GatewayCronCreatorAuthorityAdmission,
-): void {
-  if (!prepared.senderIsOwner && continuation) {
-    prepared.senderIsOwner = resolveContinuationSenderIsOwner(continuation, cronCreatorAuthority);
+): GatewayCronCreatorAuthorityAdmission | undefined {
+  let effectiveAuthority = cronCreatorAuthority;
+  if (continuation) {
+    const continuationOwner = resolveContinuationOwner(continuation, cronCreatorAuthority);
+    effectiveAuthority = continuationOwner.cronCreatorAuthority;
+    if (continuationOwner.granted) {
+      prepared.senderIsOwner = true;
+    }
   }
+  finalizeExecApprovalHandoff(prepared);
+  return effectiveAuthority;
+}
+
+/** Finalizes a prepared dispatch and returns the admission its run scope may carry. */
+export function finalizeAgentRunDispatch(
+  prepared: {
+    userTurn: PreparedAgentRunUserTurn;
+    cronCreatorAuthority?: GatewayCronCreatorAuthorityAdmission;
+  },
+  continuation: Parameters<typeof resolveContinuationOwner>[0],
+): GatewayCronCreatorAuthorityAdmission | undefined {
+  return finalizePreparedAgentRunUserTurn(
+    prepared.userTurn,
+    continuation,
+    prepared.cronCreatorAuthority,
+  );
+}
+
+function finalizeExecApprovalHandoff(prepared: PreparedAgentRunUserTurn): void {
   const handoffId = prepared.claimedExecApprovalFollowupHandoffId;
   if (!handoffId) {
     return;

@@ -27,6 +27,8 @@ import {
 type RequesterCronAuthority = {
   managementEntitlement?: NonNullable<CronCreatorAuthorityCapability["managementEntitlement"]>;
   requesterOwner?: CronCreatorAuthorityCapability["requesterOwner"];
+  /** Continuation hop the owner reaches when this authority is admitted; scope-derived only. */
+  requesterOwnerHop?: number;
   requesterSessionKey: string;
   requesterSessionId: string;
   requesterAgentId: string;
@@ -272,6 +274,7 @@ export function prepareRequesterCronAuthority(params: {
         requesterSessionId: capture.sessionId,
         managementEntitlement: capture.managementEntitlement,
         requesterOwner: capture.requesterOwner,
+        requesterOwnerHop: capture.requesterOwnerHop,
         lifecycleGeneration: capture.lifecycleGeneration,
         sessionLifecycleRevision: session.entry.lifecycleRevision,
         sessionFacts,
@@ -545,6 +548,7 @@ export function captureRequesterFollowupAuthority(params: {
     kind: "followup",
     ...params,
     requesterOwner: capture.requesterOwner,
+    requesterOwnerHop: capture.requesterOwnerHop,
     managementEntitlement: capture.managementEntitlement,
     lifecycleGeneration: capture.lifecycleGeneration,
     isFollowupCurrent: params.isCurrent,
@@ -641,6 +645,7 @@ export function consumeRequesterCronAuthorityAdmission(params: RequesterAdmissio
       callerOrigin: { kind: "unknown" };
       managementEntitlement: NonNullable<CronCreatorAuthorityCapability["managementEntitlement"]>;
       requesterOwner?: CronCreatorAuthorityCapability["requesterOwner"];
+      requesterOwnerHop?: number;
       isCurrent: () => boolean;
       bindRunScope: (scope: CronCreatorAuthorityCapability) => void;
       release?: () => void;
@@ -668,6 +673,9 @@ export function consumeRequesterCronAuthorityAdmission(params: RequesterAdmissio
     callerOrigin: { kind: "unknown" },
     managementEntitlement: dispatch.authority.managementEntitlement,
     requesterOwner: dispatch.authority.requesterOwner,
+    ...(dispatch.authority.requesterOwner
+      ? { requesterOwnerHop: dispatch.authority.requesterOwnerHop }
+      : {}),
     isCurrent: dispatch.isCurrent,
     ...(dispatch.pause
       ? {
@@ -688,7 +696,10 @@ export function consumeRequesterCronAuthorityAdmission(params: RequesterAdmissio
         scope.runId !== params.runId ||
         scope.isCurrent !== dispatch.isCurrent ||
         scope.managementEntitlement !== dispatch.authority.managementEntitlement ||
-        scope.requesterOwner !== dispatch.authority.requesterOwner ||
+        // A continuation that was not granted owner authority binds with the owner stripped.
+        (scope.requesterOwner !== undefined &&
+          (scope.requesterOwner !== dispatch.authority.requesterOwner ||
+            scope.requesterOwnerHop !== dispatch.authority.requesterOwnerHop)) ||
         scope.callerOrigin.kind !== "unknown" ||
         !scope.active ||
         scope.signal.aborted

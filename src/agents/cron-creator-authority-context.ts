@@ -44,6 +44,7 @@ export function createCronCreatorAuthorityCapability(
   channelRequester?: CronAuthenticatedChannelRequester,
   requesterOwner?: CronCreatorAuthorityCapability["requesterOwner"],
   callerScopedCreation?: true,
+  requesterOwnerHop?: number,
 ): CronCreatorAuthorityCapability | undefined {
   const normalizedRunId = runId.trim();
   return normalizedRunId
@@ -55,6 +56,7 @@ export function createCronCreatorAuthorityCapability(
         channelRequester,
         requesterOwner,
         callerScopedCreation,
+        requesterOwnerHop,
       )
     : undefined;
 }
@@ -110,6 +112,8 @@ export function captureActiveCronManagementAuthority(params: {
       lifecycleGeneration: string;
       managementEntitlement: CronManagementEntitlement;
       requesterOwner?: CronCreatorAuthorityCapability["requesterOwner"];
+      /** Continuation hop the captured owner would reach; derived only from the live scope. */
+      requesterOwnerHop?: number;
       isActive: () => boolean;
     }
   | undefined {
@@ -154,6 +158,7 @@ export function captureActiveCronManagementAuthority(params: {
         lifecycleGeneration: authority.lifecycleGeneration,
         managementEntitlement: scope.managementEntitlement,
         requesterOwner: scope.requesterOwner,
+        ...(scope.requesterOwner ? { requesterOwnerHop: (scope.requesterOwnerHop ?? 0) + 1 } : {}),
         isActive,
       }
     : undefined;

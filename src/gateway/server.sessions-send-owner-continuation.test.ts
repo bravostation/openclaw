@@ -88,7 +88,14 @@ afterAll(async () => {
   await server.close();
 });
 
-it.for(["success", "child error", "owner revoked", "owner reassigned", "new user turn"] as const)(
+it.for([
+  "success",
+  "child error",
+  "owner revoked",
+  "owner reassigned",
+  "new user turn",
+  "non-direct requester",
+] as const)(
   "enforces owner authority at the final plugin write after an inline wait expires (%s)",
   async (outcome, { signal }) => {
     const root = tempDirs.make("openclaw-followup-owner-");
@@ -100,7 +107,12 @@ it.for(["success", "child error", "owner revoked", "owner reassigned", "new user
     testState.sessionStorePath = path.join(root, "sessions.json");
     await writeSessionStore({
       entries: {
-        [parent]: { sessionId: parentId, updatedAt: 1 },
+        // R1: only a direct owner chat keeps the captured owner across its continuation.
+        [parent]: {
+          sessionId: parentId,
+          chatType: outcome === "non-direct requester" ? "group" : "direct",
+          updatedAt: 1,
+        },
         [child]: { sessionId: "owner-proof-child", spawnedBy: parent, spawnDepth: 1, updatedAt: 1 },
       },
     });
@@ -412,6 +424,14 @@ it.for(["success", "child error", "owner revoked", "owner reassigned", "new user
       );
       // Cross the native accepted-ack yield without advancing run deadlines.
       await vi.advanceTimersByTimeAsync(10);
+      if (outcome === "non-direct requester") {
+        await withinTest(parentFinished.promise, signal);
+        await withinTest(completionSettled.promise, signal);
+        expect(parentError).toBeUndefined();
+        expect(String(pluginError)).toMatch(/owner_authority_required/);
+        expect(fs.existsSync(effectPath)).toBe(false);
+        return;
+      }
       await withinTest(
         awaitGateBeforeSettlement(
           pluginEntered.promise,

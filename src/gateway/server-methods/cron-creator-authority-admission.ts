@@ -14,6 +14,8 @@ export type GatewayCronCreatorAuthorityAdmission = Readonly<{
   callerOrigin: { kind: "local" } | { kind: "unknown" };
   managementEntitlement?: CronCreatorAuthorityCapability["managementEntitlement"];
   requesterOwner?: CronCreatorAuthorityCapability["requesterOwner"];
+  /** Requester continuation hop of requesterOwner, captured from the yielding run scope only. */
+  requesterOwnerHop?: number;
   /** Fresh remote user input may create under its existing caller restrictions. */
   callerScopedCreation?: true;
   isCurrent?: () => boolean;

@@ -52,6 +52,11 @@ export type CronCreatorAuthorityRunScope = {
     channel?: string;
     accountId?: string;
   }>;
+  /**
+   * Requester continuation hops behind requesterOwner. Absent on a fresh owner ingress
+   * (hop 0); a continuation scope carries the admitted hop so a re-yield captures hop + 1.
+   */
+  readonly requesterOwnerHop?: number;
   /** Fresh admission only; never transferred with a management continuation. */
   readonly callerScopedCreation?: true;
   /** @deprecated Read managementEntitlement. Harness source compatibility lasts through 2026-10-12. */
@@ -94,6 +99,7 @@ export function createCronCreatorAuthorityRunScope(
   channelRequester?: CronAuthenticatedChannelRequester,
   requesterOwner?: CronCreatorAuthorityRunScope["requesterOwner"],
   callerScopedCreation?: true,
+  requesterOwnerHop?: number,
 ): CronCreatorAuthorityRunScope {
   const abortController = new AbortController();
   const requester = normalizeCronAuthenticatedChannelRequester(channelRequester);
@@ -104,6 +110,7 @@ export function createCronCreatorAuthorityRunScope(
     grantTokens: new Set(),
     ...(managementEntitlement ? { managementEntitlement } : {}),
     ...(requesterOwner ? { requesterOwner } : {}),
+    ...(requesterOwner && requesterOwnerHop !== undefined ? { requesterOwnerHop } : {}),
     ...(callerScopedCreation ? { callerScopedCreation } : {}),
     get controlUiAdmin(): true | undefined {
       return managementEntitlement?.source === "control-ui-admin" ? true : undefined;

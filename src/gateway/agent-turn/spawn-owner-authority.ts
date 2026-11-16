@@ -10,6 +10,8 @@ import { loadGatewaySessionEntryReadOnlyInWorker } from "../session-utils-store-
 import type { AgentTurnPrincipal } from "./types.js";
 
 const MAX_SPAWN_OWNER_HOPS = 16;
+/** Longest requester yield chain that keeps the owner captured by the original ingress. */
+export const MAX_OWNER_CONTINUATION_HOPS = 8;
 const SESSION_ID_PATTERN = /^[a-f0-9-]{36}$/;
 
 export type SpawnOwnerAuthority =
@@ -128,6 +130,15 @@ export function resolveRequesterContinuationOwnerAuthority(params: {
   if (!authority || !owner || authority.callerOrigin.kind !== "unknown" || !authority.isCurrent) {
     return deny("no captured requester owner");
   }
+  const ownerHop = authority.requesterOwnerHop;
+  if (
+    typeof ownerHop !== "number" ||
+    !Number.isInteger(ownerHop) ||
+    ownerHop < 1 ||
+    ownerHop > MAX_OWNER_CONTINUATION_HOPS
+  ) {
+    return deny(`requester owner continuation hop is outside 1..${MAX_OWNER_CONTINUATION_HOPS}`);
+  }
   try {
     if (authority.isCurrent() !== true || owner.isCurrent() !== true) {
       return deny("requester owner no longer current");
@@ -139,11 +150,16 @@ export function resolveRequesterContinuationOwnerAuthority(params: {
   if (!params.requesterSessionKey || !entry || entry.spawnedBy || entry.chatType !== "direct") {
     return deny("requester is not a direct owner chat");
   }
-  return { granted: true, rootSessionKey: params.requesterSessionKey, hops: 0 };
+  return { granted: true, rootSessionKey: params.requesterSessionKey, hops: ownerHop };
 }
 
-/** Owner bit for a dispatched continuation turn; logs only actual grants. */
-export function resolveContinuationSenderIsOwner(
+/**
+ * Owner bit for a dispatched continuation turn plus the admission its run scope may carry.
+ * The captured requester owner survives into the run scope only when this exact run was
+ * granted, so a denied continuation that yields again cannot hand the owner to a later hop.
+ * Logs only actual grants.
+ */
+export function resolveContinuationOwner(
   params: {
     client: AgentTurnPrincipal | null;
     inputProvenance?: InputProvenance;
@@ -153,7 +169,7 @@ export function resolveContinuationSenderIsOwner(
     context: { logGateway: { info: (message: string) => void } };
   },
   cronCreatorAuthority: GatewayCronCreatorAuthorityAdmission | undefined,
-): boolean {
+): { granted: boolean; cronCreatorAuthority: GatewayCronCreatorAuthorityAdmission | undefined } {
   const continuationOwner = resolveRequesterContinuationOwnerAuthority({
     client: params.client,
     cronCreatorAuthority,
@@ -162,10 +178,23 @@ export function resolveContinuationSenderIsOwner(
     requesterSessionKey: params.resolvedSessionKey,
   });
   if (!continuationOwner.granted) {
-    return false;
+    return {
+      granted: false,
+      cronCreatorAuthority: stripRequesterOwner(cronCreatorAuthority),
+    };
   }
   params.context.logGateway.info(
-    `agent owner authority from requester continuation: run=${params.runId} session=${continuationOwner.rootSessionKey} source=${params.inputProvenance?.sourceTool ?? "unknown"}`,
+    `agent owner authority from requester continuation: run=${params.runId} session=${continuationOwner.rootSessionKey} source=${params.inputProvenance?.sourceTool ?? "unknown"} hop=${continuationOwner.hops}`,
   );
-  return true;
+  return { granted: true, cronCreatorAuthority };
+}
+
+function stripRequesterOwner(
+  admission: GatewayCronCreatorAuthorityAdmission | undefined,
+): GatewayCronCreatorAuthorityAdmission | undefined {
+  if (!admission?.requesterOwner && admission?.requesterOwnerHop === undefined) {
+    return admission;
+  }
+  const { requesterOwner: _owner, requesterOwnerHop: _hop, ...rest } = admission;
+  return Object.freeze(rest);
 }
